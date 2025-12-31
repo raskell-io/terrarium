@@ -1,0 +1,41 @@
+# First Winter
+# MVP scenario: 10 agents, scarce resources, survival pressure
+
+[meta]
+name = "First Winter"
+description = """
+Ten souls in a small world. Food is scarce.
+Will they cooperate, compete, or something else entirely?
+"""
+
+[world]
+width = 10
+height = 10
+fertile_fraction = 0.3      # 30% of cells produce food
+initial_food_per_fertile = 15
+food_regen_rate = 0.1       # 10% of capacity per epoch
+
+[agents]
+count = 10
+starting_food = 10          # Each agent starts with some food
+personality = "random"      # Randomize Big Five traits
+
+# Alternatively, specify distribution:
+# [agents.personality_distribution]
+# openness = { mean = 0.5, std = 0.2 }
+# conscientiousness = { mean = 0.5, std = 0.2 }
+# extraversion = { mean = 0.5, std = 0.2 }
+# agreeableness = { mean = 0.5, std = 0.2 }
+# neuroticism = { mean = 0.5, std = 0.2 }
+
+[simulation]
+epochs = 100
+snapshot_interval = 10      # Save full state every N epochs
+log_thoughts = true         # Include agent reasoning in logs
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 500
+temperature = 0.7

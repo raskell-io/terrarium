@@ -4,49 +4,78 @@ A societal simulation engine where LLM-powered agents form emergent civilization
 
 ## What is this?
 
-Terrarium is a **societal petri dish**. Set initial conditions, define the rules of your world, seed it with autonomous agents, then observe what emerges. Trade networks. Social hierarchies. Conflicts. Cooperation. Cultures.
+Terrarium is a **societal petri dish**. You create a world with rules, populate it with autonomous agents (each powered by an LLM), and observe what emerges.
 
-Each agent is powered by an LLM, giving them genuine decision-making capability within the constraints of their personality, memories, and circumstances.
+Each agent has:
+- **Personality**: Stable traits that bias behavior
+- **Beliefs**: Updateable, possibly wrong, shaped by experience
+- **Needs**: Hunger, energy—survival pressure
+- **Memory**: What happened to them, what they think of others
 
-## Why?
+You don't program markets, hierarchies, or alliances. You watch for them.
 
-To ask questions like:
-- Does trade emerge organically when agents have complementary needs?
-- How do leadership structures form without explicit hierarchies?
-- What conditions lead to cooperation vs. conflict?
-- Can we observe the "invisible hand" in action?
+## The Core Question
 
-This isn't a game to win. It's a **thought experiment generator**.
+> Can we observe the organic emergence of social structures by giving agents freedom within constraints?
+
+## Status
+
+**Phase**: MVP Design Complete
+
+Currently: Conceptual model validated. Ready for implementation.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Concept](docs/CONCEPT.md) | Vision, philosophy, inspirations |
+| [Architecture](docs/ARCHITECTURE.md) | Technical design, cognitive model, simulation loop |
+| [MVP](docs/MVP.md) | Current scope: 10 agents, 100 epochs, "First Winter" scenario |
+
+## MVP Scope
+
+- **10 agents** with full cognitive model
+- **10x10 grid** with fertile/barren terrain
+- **7 actions**: move, gather, eat, rest, speak, give, attack
+- **100 epochs** of simulation
+- **Output**: Event logs + human-readable chronicle
+
+Goal: Validate that the model produces interesting, coherent dynamics.
+
+## Key Design Decisions
+
+| Decision | Choice |
+|----------|--------|
+| Agent knowledge | Beliefs, not facts (agents can be wrong) |
+| Property | Belief only, no enforcement (violence is the arbiter) |
+| Time | Daily epochs, simultaneous resolution |
+| Observation | Event sourcing, post-hoc analysis |
+| Scale | Start with tribe (10), validate, then grow |
+
+## Inspirations
+
+- *Dwarf Fortress* — emergent narratives from simple systems
+- *Conway's Game of Life* — complexity from minimal rules
+- *Guns, Germs, and Steel* — geography shaping civilization
+- Agent-based modeling in computational social science
 
 ## Quick Start
 
 ```bash
 cargo build --release
-./target/release/terrarium --agents 10 --epochs 100
+./target/release/terrarium --scenario scenarios/first_winter.toml
 cat output/chronicle.md
 ```
 
-## Scale
+## What Might Emerge?
 
-| Tier | Agents | What emerges |
-|------|--------|--------------|
-| Tribe | ~10 | Personal relationships, leadership |
-| Village | ~100 | Specialization, customs, early trade |
-| Town | ~1,000 | Markets, governance, institutions |
-| City | ~10,000 | Classes, bureaucracy, culture |
-| Society | ~100,000 | States, economies, ideologies |
-
-## Inspired by
-
-- Conway's Game of Life
-- Dwarf Fortress
-- Anno / The Settlers
-- Jared Diamond's "Guns, Germs, and Steel"
-- Agent-based modeling in social sciences
-
-## Status
-
-Early development. Currently building the core simulation loop.
+We don't know. That's the point. Possibilities:
+- Trade networks (reciprocal exchange)
+- Property norms (respected claims)
+- Hierarchies (asymmetric deference)
+- Alliances (coordinated action)
+- Reputations (beliefs about others spreading)
+- Conflict patterns (scarcity-driven or personality-driven)
 
 ## License
 
