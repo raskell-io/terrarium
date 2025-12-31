@@ -119,6 +119,9 @@ impl LlmClient {
             format!("Nearby: {}", nearby_list.join(", "))
         };
 
+        // Get teachable skills for action prompt
+        let teachable_skills = agent.skills.teachable_skills();
+
         format!(
             r#"{}
 
@@ -145,7 +148,7 @@ ACTION: GATHER"#,
             epoch,
             world_perception,
             nearby_desc,
-            Action::available_actions_prompt(nearby_agents),
+            Action::available_actions_prompt(nearby_agents, &teachable_skills),
         )
     }
 
@@ -299,6 +302,21 @@ fn heuristic_action(agent: &Agent, nearby_agents: &[(uuid::Uuid, &str)]) -> Acti
         if let Some(target) = mate_candidate {
             return Action::Mate { target };
         }
+    }
+
+    // Priority 8: Teach if skilled and agreeable
+    let teachable = agent.skills.teachable_skills();
+    if !teachable.is_empty()
+        && !nearby_agents.is_empty()
+        && agent.physical.energy > 0.3
+        && (agent.identity.personality.agreeableness > 0.5
+            || agent.skills.level("teaching") > 0.5)
+        && rng.random::<f64>() < 0.15  // 15% chance
+    {
+        // Pick a random skill to teach and a random nearby agent
+        let skill = teachable[rng.random_range(0..teachable.len())].clone();
+        let (target, _) = nearby_agents[rng.random_range(0..nearby_agents.len())];
+        return Action::Teach { target, skill };
     }
 
     // Otherwise: random action

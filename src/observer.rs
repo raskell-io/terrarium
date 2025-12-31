@@ -60,6 +60,9 @@ pub struct AgentView {
 
     // Reproduction
     pub reproduction: ReproductionView,
+
+    // Skills
+    pub skills: Vec<SkillView>,
 }
 
 /// View of a social belief
@@ -79,6 +82,13 @@ pub struct ReproductionView {
     pub parent_names: Vec<String>,
     pub courtships: Vec<(String, f64)>,
     pub on_cooldown: bool,
+}
+
+/// View of a skill
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillView {
+    pub name: String,
+    pub level: f64,
 }
 
 /// View of an event for display
@@ -111,6 +121,7 @@ pub enum EventViewType {
     Courtship,
     Conception,
     Birth,
+    SkillTaught,
     Meta,
 }
 
@@ -254,6 +265,19 @@ impl AgentView {
             on_cooldown: agent.reproduction.mating_cooldown > 0,
         };
 
+        // Build skills view (sorted by level, highest first)
+        let mut skills: Vec<SkillView> = agent
+            .skills
+            .levels
+            .iter()
+            .filter(|(_, level)| **level > 0.0)
+            .map(|(name, level)| SkillView {
+                name: name.clone(),
+                level: *level,
+            })
+            .collect();
+        skills.sort_by(|a, b| b.level.partial_cmp(&a.level).unwrap_or(std::cmp::Ordering::Equal));
+
         Self {
             id: agent.id,
             name: agent.name().to_string(),
@@ -272,6 +296,7 @@ impl AgentView {
             recent_memories,
             social_beliefs,
             reproduction,
+            skills,
         }
     }
 }
@@ -458,6 +483,16 @@ impl EventView {
                 (
                     format!("{} was born to {} and {}", child_name, parent_a, parent_b),
                     EventViewType::Birth,
+                )
+            }
+            EventType::SkillTaught => {
+                let teacher = agent_name(event.agent?);
+                let student = agent_name(event.target?);
+                let skill = event.data.skill_name.as_deref().unwrap_or("unknown");
+                let level = event.data.skill_level.unwrap_or(0.0);
+                (
+                    format!("{} taught {} to {} ({:.0}%)", teacher, skill, student, level * 100.0),
+                    EventViewType::SkillTaught,
                 )
             }
         };

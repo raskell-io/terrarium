@@ -20,6 +20,8 @@ pub struct Config {
     pub reproduction: ReproductionConfig,
     #[serde(default)]
     pub aging: AgingConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,6 +164,54 @@ fn default_max_lifespan() -> usize { 150 }
 fn default_death_probability_rate() -> f64 { 0.02 }
 fn default_capability_affects_actions() -> bool { true }
 
+/// Skills system configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillsConfig {
+    /// Whether skills are enabled
+    #[serde(default = "default_skills_enabled")]
+    pub enabled: bool,
+    /// Base learning rate when taught
+    #[serde(default = "default_learning_rate")]
+    pub learning_rate: f64,
+    /// Multiplier for teaching effectiveness
+    #[serde(default = "default_teaching_multiplier")]
+    pub teaching_multiplier: f64,
+    /// Improvement per practice action
+    #[serde(default = "default_practice_improvement")]
+    pub practice_improvement: f64,
+    /// Decay rate for unused skills
+    #[serde(default = "default_decay_rate")]
+    pub decay_rate: f64,
+    /// Epochs before skill decay begins
+    #[serde(default = "default_decay_threshold_epochs")]
+    pub decay_threshold_epochs: usize,
+    /// Minimum skill level to teach
+    #[serde(default = "default_min_level_to_teach")]
+    pub min_level_to_teach: f64,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            learning_rate: 0.1,
+            teaching_multiplier: 1.5,
+            practice_improvement: 0.02,
+            decay_rate: 0.005,
+            decay_threshold_epochs: 30,
+            min_level_to_teach: 0.5,
+        }
+    }
+}
+
+fn default_skills_enabled() -> bool { true }
+fn default_learning_rate() -> f64 { 0.1 }
+fn default_teaching_multiplier() -> f64 { 1.5 }
+fn default_practice_improvement() -> f64 { 0.02 }
+fn default_decay_rate() -> f64 { 0.005 }
+fn default_decay_threshold_epochs() -> usize { 30 }
+fn default_min_level_to_teach() -> f64 { 0.5 }
+
 fn default_personality() -> String {
     "random".to_string()
 }
@@ -211,6 +261,7 @@ impl Default for Config {
             environment: None,
             reproduction: ReproductionConfig::default(),
             aging: AgingConfig::default(),
+            skills: SkillsConfig::default(),
         }
     }
 }

@@ -26,6 +26,8 @@ pub enum Action {
     Court { target: Uuid },
     /// Attempt to mate with a nearby agent (requires mutual consent and courtship threshold)
     Mate { target: Uuid },
+    /// Teach a skill to a nearby agent
+    Teach { target: Uuid, skill: String },
 }
 
 /// Movement directions (8-directional)
@@ -171,6 +173,17 @@ impl Action {
                     None
                 }
             }
+            "TEACH" => {
+                // TEACH <target> <skill>
+                if words.len() >= 3 {
+                    let target_name = words[1].to_lowercase();
+                    let skill = words[2].to_lowercase();
+                    find_agent_by_name(&target_name, nearby_agents)
+                        .map(|target| Action::Teach { target, skill })
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -208,28 +221,39 @@ impl Action {
                 let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
                 format!("{} attempts to mate with {}", agent_name, target_name)
             }
+            Action::Teach { target, skill } => {
+                let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
+                format!("{} teaches {} to {}", agent_name, skill, target_name)
+            }
         }
     }
 
     /// Get the list of available actions for prompting
-    pub fn available_actions_prompt(nearby_agents: &[(Uuid, &str)]) -> String {
-        let mut actions = vec![
-            "WAIT - do nothing, recover energy",
-            "MOVE <direction> - move (north/south/east/west/ne/nw/se/sw)",
-            "GATHER - collect food from current location",
-            "EAT - eat food from your inventory",
-            "REST - rest to recover energy",
+    /// teachable_skills: list of skill names this agent can teach (level >= 0.5)
+    pub fn available_actions_prompt(nearby_agents: &[(Uuid, &str)], teachable_skills: &[&String]) -> String {
+        let mut actions: Vec<String> = vec![
+            "WAIT - do nothing, recover energy".to_string(),
+            "MOVE <direction> - move (north/south/east/west/ne/nw/se/sw)".to_string(),
+            "GATHER - collect food from current location".to_string(),
+            "EAT - eat food from your inventory".to_string(),
+            "REST - rest to recover energy".to_string(),
         ];
 
         if !nearby_agents.is_empty() {
-            actions.push("SPEAK <name> <message> - say something to someone nearby");
-            actions.push("GIVE <name> <amount> - give food to someone nearby");
-            actions.push("ATTACK <name> - attack someone nearby");
+            actions.push("SPEAK <name> <message> - say something to someone nearby".to_string());
+            actions.push("GIVE <name> <amount> - give food to someone nearby".to_string());
+            actions.push("ATTACK <name> - attack someone nearby".to_string());
             if nearby_agents.len() >= 2 {
-                actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>");
+                actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>".to_string());
             }
-            actions.push("COURT <name> - court someone nearby (builds courtship over time)");
-            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent and sufficient courtship)");
+            actions.push("COURT <name> - court someone nearby (builds courtship over time)".to_string());
+            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent and sufficient courtship)".to_string());
+
+            // Show TEACH if agent has teachable skills
+            if !teachable_skills.is_empty() {
+                let skills_list = teachable_skills.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("/");
+                actions.push(format!("TEACH <name> <skill> - teach a skill ({}) to someone nearby", skills_list));
+            }
         }
 
         actions.join("\n")

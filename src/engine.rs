@@ -420,12 +420,17 @@ impl Engine {
                     let agent = &self.agents[agent_idx];
                     let pos = (agent.physical.x, agent.physical.y);
 
+                    // Calculate skill bonus: hunting +50% at max, foraging +30% at max
+                    let hunting_level = agent.skills.level("hunting");
+                    let foraging_level = agent.skills.level("foraging");
+                    let skill_bonus = 1.0 + hunting_level * 0.5 + foraging_level * 0.3;
+
                     // How many agents are gathering here?
                     let num_gatherers = gathers_per_cell.get(&pos).map(|v| v.len()).unwrap_or(1);
 
-                    // Split the take amount, modified by age (elderly gather less)
+                    // Split the take amount, modified by age and skills
                     let base_max = 5 / num_gatherers as u32;
-                    let max_take = ((base_max as f64 * age_mod).round() as u32).max(1);
+                    let max_take = ((base_max as f64 * age_mod * skill_bonus).round() as u32).max(1);
 
                     // Take food from cell
                     let (taken, remaining_food) = if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
@@ -441,6 +446,9 @@ impl Engine {
                         let gather_cost = 0.1 / age_mod;
                         self.agents[agent_idx].physical.energy =
                             (self.agents[agent_idx].physical.energy - gather_cost).max(0.0);
+
+                        // Practice foraging skill when gathering
+                        self.agents[agent_idx].skills.practice("foraging", epoch);
 
                         self.log_and_track(Event::gathered(epoch, agent_id, taken))?;
 
@@ -481,12 +489,18 @@ impl Engine {
                         let target_agent = &self.agents[target_idx];
 
                         if is_adjacent(agent, target_agent) {
+                            // Leadership bonus: +50% sentiment gain at max level
+                            let leadership_bonus = 1.0 + agent.skills.level("leadership") * 0.5;
+
                             self.log_and_track(Event::spoke(
                                 epoch,
                                 agent_id,
                                 target,
                                 &message,
                             ))?;
+
+                            // Practice leadership when speaking
+                            self.agents[agent_idx].skills.practice("leadership", epoch);
 
                             // Both agents remember the interaction
                             let agent_name = self.agents[agent_idx].name().to_string();
@@ -506,7 +520,7 @@ impl Engine {
                                 agent_id,
                             ));
 
-                            // Update familiarity
+                            // Update familiarity (speaker gets leadership bonus for target's sentiment)
                             self.agents[agent_idx].beliefs.update_sentiment(
                                 target,
                                 &target_name,
@@ -516,7 +530,7 @@ impl Engine {
                             self.agents[target_idx].beliefs.update_sentiment(
                                 agent_id,
                                 &agent_name,
-                                0.05,
+                                0.05 * leadership_bonus,
                                 epoch,
                             );
                         }
@@ -530,6 +544,9 @@ impl Engine {
                         let target_agent = &self.agents[target_idx];
 
                         if is_adjacent(agent, target_agent) {
+                            // Leadership bonus: +50% trust/sentiment gain at max level
+                            let leadership_bonus = 1.0 + agent.skills.level("leadership") * 0.5;
+
                             let actual = self.agents[agent_idx].remove_food(amount);
                             if actual > 0 {
                                 self.agents[target_idx].add_food(actual);
@@ -561,17 +578,20 @@ impl Engine {
                                     EpisodeCategory::Gift,
                                 ));
 
-                                // Update trust
+                                // Practice leadership when giving
+                                self.agents[agent_idx].skills.practice("leadership", epoch);
+
+                                // Update trust (giver gets leadership bonus)
                                 self.agents[target_idx].beliefs.update_trust(
                                     agent_id,
                                     &agent_name,
-                                    0.2,
+                                    0.2 * leadership_bonus,
                                     epoch,
                                 );
                                 self.agents[target_idx].beliefs.update_sentiment(
                                     agent_id,
                                     &agent_name,
-                                    0.2,
+                                    0.2 * leadership_bonus,
                                     epoch,
                                 );
                             }
@@ -652,6 +672,9 @@ impl Engine {
                         let target_agent = &self.agents[target_idx];
 
                         if is_adjacent(agent, target_agent) && target_agent.is_alive() {
+                            // Diplomacy bonus: gossip is 2x as influential at max level
+                            let diplomacy_bonus = 1.0 + agent.skills.level("diplomacy");
+
                             // Get the gossiper's beliefs about the subject
                             let (gossiper_trust, gossiper_sentiment) = self.agents[agent_idx]
                                 .beliefs
@@ -659,17 +682,24 @@ impl Engine {
                                 .map(|b| (b.trust, b.sentiment))
                                 .unwrap_or((0.0, 0.0));
 
+                            // Apply diplomacy bonus to influence
+                            let effective_trust = gossiper_trust * diplomacy_bonus;
+                            let effective_sentiment = gossiper_sentiment * diplomacy_bonus;
+
                             let agent_name = self.agents[agent_idx].name().to_string();
                             let target_name = self.agents[target_idx].name().to_string();
                             let about_name = self.agents[about_idx].name().to_string();
+
+                            // Practice diplomacy when gossiping
+                            self.agents[agent_idx].skills.practice("diplomacy", epoch);
 
                             // Target receives the gossip and updates their belief
                             let sentiment_desc = self.agents[target_idx].beliefs.receive_gossip(
                                 agent_id,
                                 about,
                                 &about_name,
-                                gossiper_trust,
-                                gossiper_sentiment,
+                                effective_trust,
+                                effective_sentiment,
                                 epoch,
                             );
 
@@ -794,6 +824,105 @@ impl Engine {
                 Action::Mate { target: _ } => {
                     // Mate actions are handled separately after all actions are collected
                     // to check for mutual consent
+                }
+
+                Action::Teach { target, skill } => {
+                    if !self.config.skills.enabled {
+                        continue;
+                    }
+
+                    let target_idx = self.agents.iter().position(|a| a.id == target);
+                    if let Some(target_idx) = target_idx {
+                        let agent = &self.agents[agent_idx];
+                        let target_agent = &self.agents[target_idx];
+
+                        // Check: adjacent, target alive, teacher has skill at teachable level
+                        let teacher_level = agent.skills.level(&skill);
+                        let min_level = self.config.skills.min_level_to_teach;
+
+                        if is_adjacent(agent, target_agent)
+                            && target_agent.is_alive()
+                            && teacher_level >= min_level
+                        {
+                            let agent_name = self.agents[agent_idx].name().to_string();
+                            let target_name = self.agents[target_idx].name().to_string();
+
+                            // Calculate skill improvement
+                            // Base: teacher_level * teaching_multiplier * learning_rate
+                            // Bonus from target's openness (learning aptitude)
+                            let learning_rate = self.config.skills.learning_rate;
+                            let teaching_mult = self.config.skills.teaching_multiplier;
+                            let teacher_teaching_skill = self.agents[agent_idx].skills.level("teaching");
+                            let target_openness = self.agents[target_idx].identity.personality.openness;
+
+                            let improvement = teacher_level
+                                * learning_rate
+                                * teaching_mult
+                                * (1.0 + teacher_teaching_skill * 0.5)
+                                * (1.0 + target_openness * 0.3);
+
+                            // Target can't exceed teacher's level
+                            let target_current = self.agents[target_idx].skills.level(&skill);
+                            let max_new_level = teacher_level.min(1.0);
+                            let new_level = (target_current + improvement).min(max_new_level);
+
+                            if new_level > target_current {
+                                self.agents[target_idx].skills.improve(&skill, improvement, epoch);
+
+                                // Teacher practices teaching skill
+                                self.agents[agent_idx].skills.practice("teaching", epoch);
+                                let practice_imp = self.config.skills.practice_improvement;
+                                self.agents[agent_idx].skills.improve("teaching", practice_imp * 0.5, epoch);
+
+                                // Energy cost for teaching
+                                self.agents[agent_idx].physical.energy =
+                                    (self.agents[agent_idx].physical.energy - 0.1).max(0.0);
+
+                                // Log event
+                                self.log_and_track(Event::skill_taught(
+                                    epoch,
+                                    agent_id,
+                                    target,
+                                    &skill,
+                                    new_level,
+                                ))?;
+
+                                // Create memories
+                                self.agents[agent_idx].memory.remember(Episode::social(
+                                    epoch,
+                                    &format!("I taught {} about {}", target_name, skill),
+                                    0.2,
+                                    target,
+                                ));
+
+                                self.agents[target_idx].memory.remember(Episode::social(
+                                    epoch,
+                                    &format!("{} taught me {}", agent_name, skill),
+                                    0.3,
+                                    agent_id,
+                                ));
+
+                                // Boost trust and sentiment
+                                self.agents[target_idx].beliefs.update_trust(
+                                    agent_id,
+                                    &agent_name,
+                                    0.1,
+                                    epoch,
+                                );
+                                self.agents[target_idx].beliefs.update_sentiment(
+                                    agent_id,
+                                    &agent_name,
+                                    0.1,
+                                    epoch,
+                                );
+
+                                debug!(
+                                    "{} taught {} to {} (now at {:.2})",
+                                    agent_name, skill, target_name, new_level
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1097,12 +1226,16 @@ impl Engine {
 
             // Calculate generation (max of parents + 1)
             let carrier_gen = self.agents[carrier_idx].reproduction.family.generation;
-            let partner_gen = self.agents
-                .iter()
-                .find(|a| a.id == partner_id)
-                .map(|a| a.reproduction.family.generation)
+            let partner_idx = self.agents.iter().position(|a| a.id == partner_id);
+            let partner_gen = partner_idx
+                .map(|idx| self.agents[idx].reproduction.family.generation)
                 .unwrap_or(0);
             let offspring_generation = carrier_gen.max(partner_gen) + 1;
+
+            // Get parent skills for inheritance
+            let parent_skills = partner_idx.map(|idx| {
+                (&self.agents[carrier_idx].skills, &self.agents[idx].skills)
+            });
 
             // Create the child
             let child = Agent::new_with_identity(
@@ -1112,6 +1245,7 @@ impl Engine {
                 starting_food,
                 vec![carrier_id, partner_id],
                 offspring_generation,
+                parent_skills,
             );
             let child_id = child.id;
             let child_name = child.name().to_string();

@@ -270,6 +270,35 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         }
     }
 
+    // Skills
+    if !agent.skills.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Skills:",
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )));
+
+        for skill in agent.skills.iter().take(4) {
+            let level_bar = skill_bar(skill.level);
+            let level_color = if skill.level >= 0.7 {
+                Color::Green
+            } else if skill.level >= 0.3 {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            };
+            let tier = skill_tier(skill.level);
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(&skill.name, Style::default().fg(Color::Cyan)),
+                Span::raw(": "),
+                Span::styled(level_bar, Style::default().fg(level_color)),
+                Span::raw(" "),
+                Span::styled(tier, Style::default().fg(level_color)),
+            ]));
+        }
+    }
+
     // Recent memories (if full view)
     if show_full && !agent.recent_memories.is_empty() {
         lines.push(Line::from(""));
@@ -302,4 +331,26 @@ fn courtship_display(score: f64) -> String {
     let filled = (score * 5.0).round() as usize;
     let empty = 5 - filled.min(5);
     format!("{}{}", "♥".repeat(filled.min(5)), "♡".repeat(empty))
+}
+
+/// Convert skill level to a visual bar (0.0 to 1.0)
+fn skill_bar(level: f64) -> String {
+    let filled = (level * 5.0).round() as usize;
+    let empty = 5 - filled.min(5);
+    format!("{}{}", "█".repeat(filled.min(5)), "░".repeat(empty))
+}
+
+/// Get skill tier name from level
+fn skill_tier(level: f64) -> &'static str {
+    if level >= 0.9 {
+        "master"
+    } else if level >= 0.7 {
+        "expert"
+    } else if level >= 0.5 {
+        "skilled"
+    } else if level >= 0.2 {
+        "competent"
+    } else {
+        "novice"
+    }
 }

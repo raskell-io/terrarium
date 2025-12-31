@@ -23,6 +23,7 @@ pub struct Agent {
     pub physical: PhysicalState,
     pub active_goal: Option<Goal>,
     pub reproduction: ReproductionState,
+    pub skills: Skills,
 }
 
 /// Reproduction state for an agent
@@ -66,6 +67,139 @@ pub struct FamilyRelations {
     pub generation: usize,
 }
 
+/// Skills and proficiencies for an agent
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Skills {
+    /// Skill name -> level (0.0 to 1.0)
+    pub levels: HashMap<String, f64>,
+    /// Last epoch each skill was practiced
+    pub last_practiced: HashMap<String, usize>,
+}
+
+impl Skills {
+    /// Create skills based on personality traits
+    pub fn from_personality(personality: &Personality) -> Self {
+        let mut levels = HashMap::new();
+        let mut rng = rand::rng();
+
+        // High openness → foraging (curiosity, exploration)
+        if personality.openness > 0.6 {
+            let level = 0.15 + rng.random::<f64>() * 0.1;
+            levels.insert("foraging".to_string(), level);
+        }
+
+        // High conscientiousness → crafting (discipline, patience)
+        if personality.conscientiousness > 0.6 {
+            let level = 0.15 + rng.random::<f64>() * 0.1;
+            levels.insert("crafting".to_string(), level);
+        }
+
+        // High extraversion → leadership (social confidence)
+        if personality.extraversion > 0.6 {
+            let level = 0.15 + rng.random::<f64>() * 0.1;
+            levels.insert("leadership".to_string(), level);
+        }
+
+        // High agreeableness → teaching (empathy, patience)
+        if personality.agreeableness > 0.6 {
+            let level = 0.15 + rng.random::<f64>() * 0.1;
+            levels.insert("teaching".to_string(), level);
+        }
+
+        // Low neuroticism → hunting (calm under pressure)
+        if personality.neuroticism < 0.4 {
+            let level = 0.15 + rng.random::<f64>() * 0.1;
+            levels.insert("hunting".to_string(), level);
+        }
+
+        // Also give a small diplomacy bonus if agreeable or extraverted
+        if personality.agreeableness > 0.5 || personality.extraversion > 0.5 {
+            let level = 0.1 + rng.random::<f64>() * 0.1;
+            levels.insert("diplomacy".to_string(), level);
+        }
+
+        Self {
+            levels,
+            last_practiced: HashMap::new(),
+        }
+    }
+
+    /// Inherit skills from parents (average * 0.3) plus personality bonus
+    pub fn from_parents(parent_a: &Skills, parent_b: &Skills, personality: &Personality) -> Self {
+        let mut skills = Skills::from_personality(personality);
+
+        // Collect all skill names from both parents
+        let mut all_skills: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for name in parent_a.levels.keys() {
+            all_skills.insert(name.clone());
+        }
+        for name in parent_b.levels.keys() {
+            all_skills.insert(name.clone());
+        }
+
+        // Inherit at 30% of parent average
+        for name in all_skills {
+            let level_a = parent_a.levels.get(&name).copied().unwrap_or(0.0);
+            let level_b = parent_b.levels.get(&name).copied().unwrap_or(0.0);
+            let inherited = (level_a + level_b) / 2.0 * 0.3;
+
+            // Add to existing personality-based skill or set new
+            let current = skills.levels.get(&name).copied().unwrap_or(0.0);
+            skills.levels.insert(name, (current + inherited).min(1.0));
+        }
+
+        skills
+    }
+
+    /// Get skill level (0.0 if not known)
+    pub fn level(&self, skill: &str) -> f64 {
+        self.levels.get(skill).copied().unwrap_or(0.0)
+    }
+
+    /// Check if agent can teach a skill (level >= 0.5)
+    pub fn can_teach(&self, skill: &str) -> bool {
+        self.level(skill) >= 0.5
+    }
+
+    /// Get all teachable skills
+    pub fn teachable_skills(&self) -> Vec<&String> {
+        self.levels
+            .iter()
+            .filter(|(_, level)| **level >= 0.5)
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    /// Improve a skill (capped at 1.0)
+    pub fn improve(&mut self, skill: &str, amount: f64, epoch: usize) {
+        let current = self.levels.get(skill).copied().unwrap_or(0.0);
+        self.levels.insert(skill.to_string(), (current + amount).min(1.0));
+        self.last_practiced.insert(skill.to_string(), epoch);
+    }
+
+    /// Mark a skill as practiced this epoch
+    pub fn practice(&mut self, skill: &str, epoch: usize) {
+        if self.levels.contains_key(skill) {
+            self.last_practiced.insert(skill.to_string(), epoch);
+        }
+    }
+
+    /// Get skill level description
+    pub fn level_description(level: f64) -> &'static str {
+        if level >= 0.9 {
+            "master"
+        } else if level >= 0.7 {
+            "expert"
+        } else if level >= 0.5 {
+            "skilled"
+        } else if level >= 0.2 {
+            "competent"
+        } else {
+            "novice"
+        }
+    }
+}
+
 /// Physical state of an agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhysicalState {
@@ -98,9 +232,11 @@ pub enum Goal {
 impl Agent {
     /// Create a new agent with random identity at the given position
     pub fn new(name: String, x: usize, y: usize, starting_food: u32) -> Self {
+        let identity = Identity::new(name);
+        let skills = Skills::from_personality(&identity.personality);
         Self {
             id: Uuid::new_v4(),
-            identity: Identity::new(name),
+            identity,
             beliefs: Beliefs::new(),
             memory: Memory::new(),
             physical: PhysicalState {
@@ -114,6 +250,7 @@ impl Agent {
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState::default(),
+            skills,
         }
     }
 
@@ -125,7 +262,16 @@ impl Agent {
         starting_food: u32,
         parents: Vec<Uuid>,
         generation: usize,
+        parent_skills: Option<(&Skills, &Skills)>,
     ) -> Self {
+        // Skills: inherit from parents if available, otherwise from personality
+        let skills = match parent_skills {
+            Some((parent_a, parent_b)) => {
+                Skills::from_parents(parent_a, parent_b, &identity.personality)
+            }
+            None => Skills::from_personality(&identity.personality),
+        };
+
         Self {
             id: Uuid::new_v4(),
             identity,
@@ -150,6 +296,7 @@ impl Agent {
                 },
                 ..Default::default()
             },
+            skills,
         }
     }
 
@@ -361,15 +508,49 @@ impl Agent {
             format!("\nReproduction: {}", reproduction_parts.join(". "))
         };
 
+        // Skills summary
+        let skills = self.skills_prompt_summary();
+
         format!(
-            "{}\n\n{}{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}{}\n\n{}\n\n{}\n\n{}\n\n{}",
             self.identity.prompt_description(),
             physical,
             reproduction,
+            skills,
             goal,
             self.beliefs.prompt_summary(epoch),
             self.memory.prompt_summary(epoch),
         )
+    }
+
+    /// Generate skills summary for LLM prompting
+    fn skills_prompt_summary(&self) -> String {
+        let skill_tiers: Vec<String> = self
+            .skills
+            .levels
+            .iter()
+            .filter(|(_, level)| **level >= 0.2)
+            .map(|(name, level)| {
+                let tier = if *level >= 0.9 {
+                    "master"
+                } else if *level >= 0.7 {
+                    "expert"
+                } else if *level >= 0.5 {
+                    "skilled"
+                } else if *level >= 0.2 {
+                    "competent"
+                } else {
+                    "novice"
+                };
+                format!("{} ({})", name, tier)
+            })
+            .collect();
+
+        if skill_tiers.is_empty() {
+            "You have no developed skills yet.".to_string()
+        } else {
+            format!("Your skills: {}", skill_tiers.join(", "))
+        }
     }
 
     /// Determine a new goal based on current state

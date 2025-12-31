@@ -46,6 +46,9 @@ pub enum EventType {
     Conceived,
     BirthOccurred,
 
+    // Skills
+    SkillTaught,
+
     // Meta
     EpochStart,
     EpochEnd,
@@ -104,6 +107,12 @@ pub struct EventData {
     /// Child name for birth events
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child_name: Option<String>,
+    /// Skill name for skill events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_name: Option<String>,
+    /// Skill level for skill events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_level: Option<f64>,
 }
 
 impl Event {
@@ -410,6 +419,26 @@ impl Event {
             },
         }
     }
+
+    pub fn skill_taught(
+        epoch: usize,
+        teacher: Uuid,
+        student: Uuid,
+        skill_name: &str,
+        new_level: f64,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::SkillTaught,
+            agent: Some(teacher),
+            target: Some(student),
+            data: EventData {
+                skill_name: Some(skill_name.to_string()),
+                skill_level: Some(new_level),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -434,6 +463,8 @@ impl EventData {
             parent_b: None,
             child: None,
             child_name: None,
+            skill_name: None,
+            skill_level: None,
         }
     }
 }
