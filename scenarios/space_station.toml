@@ -1,0 +1,74 @@
+# Orbital Station
+# Artificial habitat in Earth orbit
+
+[meta]
+name = "Orbital Station Alpha"
+description = """
+Life aboard an orbital station. Limited space, recycled resources,
+and the ever-present dangers of space. Solar flares and maintenance
+cycles disrupt daily life.
+"""
+
+[world]
+width = 5
+height = 5
+fertile_fraction = 0.25     # Hydroponic bays
+initial_food_per_fertile = 12
+food_regen_rate = 0.08
+
+[agents]
+count = 6
+starting_food = 15
+personality = "random"
+
+[simulation]
+epochs = 150
+snapshot_interval = 15
+log_thoughts = true
+
+[environment]
+name = "Orbital Station"
+description = "An artificial habitat in Earth orbit."
+cycle_length = 50
+base_hazard = 0.4
+hazard_type = "Radiation"
+gravity = 0.0               # Microgravity
+breathable_atmosphere = true
+base_temperature = "Temperate"
+
+[[environment.phases]]
+name = "Normal Operations"
+start = 0.0
+end = 0.7
+food_regen_modifier = 0.5
+hazard_modifier = 0.5
+energy_drain_modifier = 1.0
+movement_cost_modifier = 0.7
+description = "Systems nominal. Routine station life."
+
+[[environment.phases]]
+name = "Solar Maximum"
+start = 0.7
+end = 0.85
+food_regen_modifier = 0.3
+hazard_modifier = 2.5
+energy_drain_modifier = 1.5
+movement_cost_modifier = 0.7
+description = "Increased solar radiation. Shelter in shielded areas."
+
+[[environment.phases]]
+name = "Maintenance Cycle"
+start = 0.85
+end = 1.0
+food_regen_modifier = 0.4
+hazard_modifier = 1.0
+energy_drain_modifier = 1.2
+movement_cost_modifier = 0.8
+description = "Station maintenance and resupply."
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 500
+temperature = 0.7

@@ -1,0 +1,83 @@
+# Antarctica Research Station
+# Extreme polar environment with long winters
+
+[meta]
+name = "Antarctica Station"
+description = """
+Scientists isolated at a polar research station.
+The long polar night tests their cooperation and sanity.
+"""
+
+[world]
+width = 6
+height = 6
+fertile_fraction = 0.15     # Very limited indoor growing
+initial_food_per_fertile = 8
+food_regen_rate = 0.05      # Very slow
+
+[agents]
+count = 6
+starting_food = 20          # Well-supplied initially
+personality = "random"
+
+[simulation]
+epochs = 100
+snapshot_interval = 10
+log_thoughts = true
+
+[environment]
+name = "Antarctica"
+description = "Earth's frozen continent. Extreme cold, limited resources."
+cycle_length = 100
+base_hazard = 0.4
+hazard_type = "Cold"
+gravity = 1.0
+breathable_atmosphere = true
+base_temperature = "Freezing"
+
+[[environment.phases]]
+name = "Polar Summer"
+start = 0.0
+end = 0.25
+food_regen_modifier = 0.5
+hazard_modifier = 0.5
+energy_drain_modifier = 1.2
+movement_cost_modifier = 1.2
+description = "Endless daylight but still freezing. Brief window for resources."
+
+[[environment.phases]]
+name = "Autumn Freeze"
+start = 0.25
+end = 0.4
+food_regen_modifier = 0.1
+hazard_modifier = 1.5
+energy_drain_modifier = 1.8
+movement_cost_modifier = 1.5
+description = "Temperatures plummet. Darkness approaches."
+
+[[environment.phases]]
+name = "Polar Night"
+start = 0.4
+end = 0.75
+food_regen_modifier = 0.0
+hazard_modifier = 3.0
+energy_drain_modifier = 2.5
+movement_cost_modifier = 2.0
+description = "Months of total darkness. Extreme cold. Survival is paramount."
+
+[[environment.phases]]
+name = "Spring Thaw"
+start = 0.75
+end = 1.0
+food_regen_modifier = 0.3
+hazard_modifier = 1.0
+energy_drain_modifier = 1.5
+movement_cost_modifier = 1.3
+description = "Light returns. Ice begins to soften."
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 500
+temperature = 0.7

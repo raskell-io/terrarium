@@ -120,6 +120,20 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 
     let speed_text = format!("{}ms/epoch", app.speed_ms);
 
+    // Get environment state
+    let env_state = engine.environment_state();
+
+    // Choose phase color based on hazard level
+    let phase_style = if env_state.hazard_level > 0.5 {
+        Style::default().fg(Color::Red)
+    } else if env_state.food_regen_modifier < 0.5 {
+        Style::default().fg(Color::Yellow)
+    } else if env_state.food_regen_modifier > 1.0 {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Cyan)
+    };
+
     let line = Line::from(vec![
         Span::styled(
             " Space",
@@ -133,21 +147,23 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(": Next Agent"),
         Span::raw(" | "),
-        Span::styled("Arrows", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(": Select"),
-        Span::raw(" | "),
-        Span::styled("Q", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(": Quit"),
-        Span::raw(" | "),
         Span::styled("?", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(": Help"),
         Span::raw("  "),
         Span::styled(status, status_style),
         Span::raw(format!(
-            "  Day {} / {}  Alive: {}  Groups: {}  [{}]",
+            "  Day {} / {}  Alive: {}  ",
             engine.epoch(),
             engine.total_epochs(),
             engine.alive_count(),
+        )),
+        Span::styled(
+            format!("{}", env_state.current_phase),
+            phase_style,
+        ),
+        Span::raw(format!(
+            " (Yr {})  Groups: {}  [{}]",
+            env_state.cycle_number + 1,
             engine.current_groups().len(),
             speed_text,
         )),

@@ -7,6 +7,7 @@ mod action;
 mod agent;
 mod config;
 mod engine;
+mod environment;
 mod groups;
 mod llm;
 mod observation;
@@ -16,6 +17,7 @@ mod world;
 
 use config::Config;
 use engine::Engine;
+use environment::EnvironmentConfig;
 
 #[derive(Parser, Debug)]
 #[command(name = "terrarium")]
@@ -41,11 +43,32 @@ struct Args {
     /// Run with TUI viewer
     #[arg(long)]
     tui: bool,
+
+    /// Override environment preset (earth, mars, moon, antarctica, exoplanet, desert, station)
+    #[arg(long)]
+    environment: Option<String>,
+
+    /// List available environment presets
+    #[arg(long)]
+    list_environments: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle --list-environments
+    if args.list_environments {
+        println!("Available environment presets:");
+        println!();
+        for preset in EnvironmentConfig::available_presets() {
+            let env = EnvironmentConfig::from_name(preset).unwrap();
+            println!("  {:20} - {}", preset, env.description);
+        }
+        println!();
+        println!("Use with: --environment <preset>");
+        return Ok(());
+    }
 
     // Initialize logging
     let filter = match args.verbose {
@@ -74,6 +97,18 @@ async fn main() -> Result<()> {
     // Apply overrides
     if let Some(epochs) = args.epochs {
         config.simulation.epochs = epochs;
+    }
+
+    // Override environment if specified
+    if let Some(env_name) = &args.environment {
+        if let Some(env_config) = EnvironmentConfig::from_name(env_name) {
+            info!("Overriding environment: {}", env_config.name);
+            config.environment = Some(env_config);
+        } else {
+            eprintln!("Unknown environment: {}", env_name);
+            eprintln!("Use --list-environments to see available presets");
+            std::process::exit(1);
+        }
     }
 
     info!(

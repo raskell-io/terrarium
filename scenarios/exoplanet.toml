@@ -1,0 +1,74 @@
+# New Frontier - Exoplanet Colony
+# Earth-like exoplanet with alien ecosystem
+
+[meta]
+name = "Kepler-442b Colony"
+description = """
+Humanity's first interstellar colony on an Earth-like exoplanet.
+Alien flora and fauna, unpredictable weather, and the challenge
+of building a new civilization far from home.
+"""
+
+[world]
+width = 12
+height = 12
+fertile_fraction = 0.4      # Abundant alien vegetation
+initial_food_per_fertile = 20
+food_regen_rate = 0.12      # Faster growth in alien soil
+
+[agents]
+count = 12
+starting_food = 12
+personality = "random"
+
+[simulation]
+epochs = 120
+snapshot_interval = 10
+log_thoughts = true
+
+[environment]
+name = "Kepler-442b"
+description = "An Earth-like exoplanet. New frontier for humanity."
+cycle_length = 120
+base_hazard = 0.2
+hazard_type = "None"
+gravity = 1.1
+breathable_atmosphere = true
+base_temperature = "Temperate"
+
+[[environment.phases]]
+name = "Growing Season"
+start = 0.0
+end = 0.4
+food_regen_modifier = 1.3
+hazard_modifier = 0.5
+energy_drain_modifier = 0.9
+movement_cost_modifier = 1.0
+description = "Alien flora blooms. Resources are plentiful."
+
+[[environment.phases]]
+name = "Storm Season"
+start = 0.4
+end = 0.6
+food_regen_modifier = 0.6
+hazard_modifier = 2.0
+energy_drain_modifier = 1.5
+movement_cost_modifier = 1.5
+description = "Violent weather patterns. Seek shelter."
+
+[[environment.phases]]
+name = "Dormant Season"
+start = 0.6
+end = 1.0
+food_regen_modifier = 0.4
+hazard_modifier = 1.0
+energy_drain_modifier = 1.2
+movement_cost_modifier = 1.1
+description = "Native life hibernates. Quiet but lean times."
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 500
+temperature = 0.7

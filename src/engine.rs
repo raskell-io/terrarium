@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::action::{Action, Direction};
 use crate::agent::{generate_names, Agent, Episode, EpisodeCategory};
 use crate::config::Config;
+use crate::environment::{EnvironmentConfig, EnvironmentState};
 use crate::groups::{GroupTracker, Group};
 use crate::llm::LlmClient;
 use crate::observation::{Chronicle, Event};
@@ -25,6 +26,8 @@ pub struct Engine {
     max_event_epochs: usize,
     /// Group/alliance tracker
     group_tracker: GroupTracker,
+    /// Environment configuration (seasons, hazards, etc.)
+    environment: EnvironmentConfig,
 }
 
 impl Engine {
@@ -51,6 +54,14 @@ impl Engine {
         let mut chronicle = Chronicle::new(output_dir)?;
         chronicle.register_agents(&agents);
 
+        // Get environment config (use from config or default to earth temperate)
+        let environment = config
+            .environment
+            .clone()
+            .unwrap_or_else(EnvironmentConfig::default);
+
+        info!("Environment: {} (cycle: {} epochs)", environment.name, environment.cycle_length);
+
         Ok(Self {
             config,
             world,
@@ -60,6 +71,7 @@ impl Engine {
             recent_events: Vec::new(),
             max_event_epochs: 10,
             group_tracker: GroupTracker::new(),
+            environment,
         })
     }
 
@@ -115,6 +127,16 @@ impl Engine {
     /// Get current groups/alliances
     pub fn current_groups(&self) -> &[Group] {
         self.group_tracker.current_groups()
+    }
+
+    /// Get the current environment state
+    pub fn environment_state(&self) -> EnvironmentState {
+        self.environment.state_at(self.world.epoch)
+    }
+
+    /// Get the environment configuration
+    pub fn environment_config(&self) -> &EnvironmentConfig {
+        &self.environment
     }
 
     /// Step the simulation by one epoch (for TUI control)
@@ -216,23 +238,47 @@ impl Engine {
     async fn run_epoch(&mut self, epoch: usize) -> Result<()> {
         debug!("Epoch {} starting", epoch);
 
+        // Get current environment state
+        let env_state = self.environment.state_at(epoch);
+
         // Log epoch start
         self.log_and_track(Event::epoch_start(epoch))?;
 
-        // 1. World tick (regenerate resources)
-        self.world.tick(self.config.world.food_regen_rate);
+        // 1. World tick (regenerate resources with environmental modifier)
+        self.world.tick(self.config.world.food_regen_rate, env_state.food_regen_modifier);
 
-        // 2. Update agent needs
+        // 2. Update agent needs (with environmental effects)
         let mut death_events = Vec::new();
         for agent in &mut self.agents {
             if agent.is_alive() {
                 agent.tick_hunger();
                 agent.tick_energy();
+
+                // Apply environmental hazard effects
+                if env_state.hazard_level > 0.0 {
+                    // Extra energy drain from harsh environment
+                    let extra_drain = env_state.energy_drain * env_state.hazard_level;
+                    agent.physical.energy = (agent.physical.energy - extra_drain).max(0.0);
+
+                    // High hazard can cause health damage
+                    if env_state.hazard_level > 0.5 {
+                        let health_damage = (env_state.hazard_level - 0.5) * 0.02;
+                        agent.physical.health = (agent.physical.health - health_damage).max(0.0);
+                    }
+                }
+
                 agent.update_goal();
 
-                // Check for starvation death
+                // Check for death (starvation or environmental)
                 if !agent.is_alive() {
-                    death_events.push(Event::died(epoch, agent.id, "starvation"));
+                    let cause = if agent.physical.hunger >= 1.0 {
+                        "starvation"
+                    } else if env_state.hazard_level > 0.5 {
+                        env_state.hazard_type.describe()
+                    } else {
+                        "exhaustion"
+                    };
+                    death_events.push(Event::died(epoch, agent.id, cause));
                 }
             }
         }
@@ -243,13 +289,17 @@ impl Engine {
         // 3. Perception and deliberation (collect actions)
         let mut actions: HashMap<Uuid, Action> = HashMap::new();
 
+        // Build environment perception
+        let env_perception = self.environment.describe(epoch);
+
         for agent in &self.agents {
             if !agent.is_alive() {
                 continue;
             }
 
-            // Get perception
-            let perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
+            // Get perception (world + environment)
+            let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
+            let perception = format!("{}\n{}", env_perception, world_perception);
 
             // Get nearby agents
             let nearby: Vec<(Uuid, &str)> = self
@@ -293,6 +343,10 @@ impl Engine {
 
     /// Resolve all actions for an epoch
     fn resolve_actions(&mut self, epoch: usize, actions: HashMap<Uuid, Action>) -> Result<()> {
+        // Get environment state for movement cost
+        let env_state = self.environment.state_at(epoch);
+        let movement_cost = 0.05 * env_state.movement_cost;
+
         // Collect gather actions per cell for splitting
         let mut gathers_per_cell: HashMap<(usize, usize), Vec<Uuid>> = HashMap::new();
 
@@ -330,7 +384,8 @@ impl Engine {
                         let from = (agent.physical.x, agent.physical.y);
                         agent.physical.x = new_x;
                         agent.physical.y = new_y;
-                        agent.physical.energy = (agent.physical.energy - 0.05).max(0.0);
+                        // Movement cost affected by environment (harsh conditions = more effort)
+                        agent.physical.energy = (agent.physical.energy - movement_cost).max(0.0);
 
                         self.log_and_track(Event::moved(
                             epoch,

@@ -113,19 +113,27 @@ impl World {
     }
 
     /// Regenerate resources across the world
-    pub fn regenerate_resources(&mut self, regen_rate: f64) {
+    ///
+    /// The `modifier` parameter adjusts the regeneration rate based on environmental
+    /// conditions (seasons, weather, etc.). A modifier of 1.0 is normal, < 1.0 reduces
+    /// regeneration, > 1.0 increases it.
+    pub fn regenerate_resources(&mut self, regen_rate: f64, modifier: f64) {
         for cell in &mut self.cells {
             if cell.terrain == Terrain::Fertile && cell.food < cell.food_capacity {
-                let regen = (cell.food_capacity as f64 * regen_rate).ceil() as u32;
+                let effective_rate = regen_rate * modifier;
+                let regen = (cell.food_capacity as f64 * effective_rate).ceil() as u32;
                 cell.food = (cell.food + regen).min(cell.food_capacity);
             }
         }
     }
 
     /// Advance the world by one epoch
-    pub fn tick(&mut self, regen_rate: f64) {
+    ///
+    /// The `food_regen_modifier` adjusts resource regeneration based on environmental
+    /// conditions (1.0 = normal, < 1.0 = scarce, > 1.0 = abundant).
+    pub fn tick(&mut self, regen_rate: f64, food_regen_modifier: f64) {
         self.epoch += 1;
-        self.regenerate_resources(regen_rate);
+        self.regenerate_resources(regen_rate, food_regen_modifier);
     }
 
     /// Describe a cell for agent perception

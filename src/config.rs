@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
+use crate::environment::EnvironmentConfig;
 use crate::llm::LlmConfig;
 use crate::world::WorldConfig;
 
@@ -13,6 +14,8 @@ pub struct Config {
     pub agents: AgentsConfig,
     pub simulation: SimulationConfig,
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub environment: Option<EnvironmentConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -85,6 +88,7 @@ impl Default for Config {
                 log_thoughts: true,
             },
             llm: LlmConfig::default(),
+            environment: None,
         }
     }
 }

@@ -1,0 +1,73 @@
+# Mars Colony
+# Harsh off-world scenario with dust storms and radiation
+
+[meta]
+name = "Mars Colony"
+description = """
+A small group of colonists on the red planet.
+Dust storms, radiation, and limited resources test their survival.
+"""
+
+[world]
+width = 8
+height = 8
+fertile_fraction = 0.2      # Hydroponics bays are limited
+initial_food_per_fertile = 10
+food_regen_rate = 0.08      # Slower growing in artificial conditions
+
+[agents]
+count = 8
+starting_food = 15          # Slightly more starting supplies
+personality = "random"
+
+[simulation]
+epochs = 200                # Longer simulation for martian year
+snapshot_interval = 20
+log_thoughts = true
+
+[environment]
+name = "Mars"
+description = "The red planet. Thin atmosphere, extreme cold, dust storms."
+cycle_length = 200          # Martian year is ~2 Earth years
+base_hazard = 0.5
+hazard_type = "Multiple"    # Cold + radiation + dust
+gravity = 0.38
+breathable_atmosphere = false
+base_temperature = "Freezing"
+
+[[environment.phases]]
+name = "Calm Season"
+start = 0.0
+end = 0.4
+food_regen_modifier = 0.6
+hazard_modifier = 0.8
+energy_drain_modifier = 1.3
+movement_cost_modifier = 1.1
+description = "Relatively calm. Dust levels low."
+
+[[environment.phases]]
+name = "Dust Storm Season"
+start = 0.4
+end = 0.7
+food_regen_modifier = 0.2
+hazard_modifier = 2.5
+energy_drain_modifier = 2.0
+movement_cost_modifier = 2.0
+description = "Global dust storms. Reduced visibility. Solar power limited."
+
+[[environment.phases]]
+name = "Clearing"
+start = 0.7
+end = 1.0
+food_regen_modifier = 0.5
+hazard_modifier = 1.2
+energy_drain_modifier = 1.5
+movement_cost_modifier = 1.3
+description = "Dust settles. Recovery period."
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 500
+temperature = 0.7
