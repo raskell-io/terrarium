@@ -61,6 +61,9 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::GroupDissolved => ("☆", Style::default().fg(Color::DarkGray)),
             EventViewType::GroupChanged => ("○", Style::default().fg(Color::Cyan)),
             EventViewType::LeadershipChanged => ("♛", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            EventViewType::RivalryFormed => ("⚔", Style::default().fg(Color::Red)),
+            EventViewType::RivalryChanged => ("↔", Style::default().fg(Color::LightRed)),
+            EventViewType::RivalryEnded => ("☮", Style::default().fg(Color::Green)),
             EventViewType::Meta => ("", Style::default().fg(Color::DarkGray)),
         };
 

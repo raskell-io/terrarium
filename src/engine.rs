@@ -745,6 +745,97 @@ impl Engine {
             }
         }
 
+        // Log new rivalries
+        for rivalry in &changes.rivalries_formed {
+            let group_a_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_a)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let group_b_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_b)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let rivalry_desc = rivalry.rivalry_type.describe();
+
+            self.log_and_track(Event::rivalry_formed(
+                epoch,
+                &group_a_name,
+                &group_b_name,
+                rivalry_desc,
+            ))?;
+
+            if rivalry.rivalry_type.is_conflict() {
+                info!(
+                    "Rivalry: {} and {} are now {}",
+                    group_a_name, group_b_name, rivalry_desc
+                );
+            }
+        }
+
+        // Log rivalry changes
+        for (rivalry, old_type, new_type) in &changes.rivalries_changed {
+            let group_a_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_a)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let group_b_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_b)
+                .map(|g| g.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let old_desc = old_type.describe();
+            let new_desc = new_type.describe();
+
+            self.log_and_track(Event::rivalry_changed(
+                epoch,
+                &group_a_name,
+                &group_b_name,
+                old_desc,
+                new_desc,
+            ))?;
+
+            info!(
+                "Relations: {} and {} changed from {} to {}",
+                group_a_name, group_b_name, old_desc, new_desc
+            );
+        }
+
+        // Log ended rivalries
+        for rivalry in &changes.rivalries_ended {
+            // Look up names from dissolved groups if needed
+            let group_a_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_a)
+                .map(|g| g.name.clone())
+                .or_else(|| {
+                    self.group_tracker.dissolved
+                        .iter()
+                        .find(|(g, _)| g.id == rivalry.group_a)
+                        .map(|(g, _)| g.name.clone())
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+            let group_b_name = self.group_tracker.groups
+                .iter()
+                .find(|g| g.id == rivalry.group_b)
+                .map(|g| g.name.clone())
+                .or_else(|| {
+                    self.group_tracker.dissolved
+                        .iter()
+                        .find(|(g, _)| g.id == rivalry.group_b)
+                        .map(|(g, _)| g.name.clone())
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            self.log_and_track(Event::rivalry_ended(
+                epoch,
+                &group_a_name,
+                &group_b_name,
+            ))?;
+        }
+
         Ok(())
     }
 }

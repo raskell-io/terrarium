@@ -36,6 +36,11 @@ pub enum EventType {
     GroupChanged,
     LeadershipChanged,
 
+    // Inter-group relations
+    RivalryFormed,
+    RivalryChanged,
+    RivalryEnded,
+
     // Meta
     EpochStart,
     EpochEnd,
@@ -70,6 +75,15 @@ pub struct EventData {
     /// Old leader for leadership change events
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_leader: Option<Uuid>,
+    /// Second group name for rivalry events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_b_name: Option<String>,
+    /// Rivalry type (hostile, tense, neutral, friendly, allied)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rivalry_type: Option<String>,
+    /// Previous rivalry type for rivalry change events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_rivalry_type: Option<String>,
 }
 
 impl Event {
@@ -267,6 +281,66 @@ impl Event {
             },
         }
     }
+
+    pub fn rivalry_formed(
+        epoch: usize,
+        group_a_name: &str,
+        group_b_name: &str,
+        rivalry_type: &str,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::RivalryFormed,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_a_name.to_string()),
+                group_b_name: Some(group_b_name.to_string()),
+                rivalry_type: Some(rivalry_type.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn rivalry_changed(
+        epoch: usize,
+        group_a_name: &str,
+        group_b_name: &str,
+        old_type: &str,
+        new_type: &str,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::RivalryChanged,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_a_name.to_string()),
+                group_b_name: Some(group_b_name.to_string()),
+                old_rivalry_type: Some(old_type.to_string()),
+                rivalry_type: Some(new_type.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn rivalry_ended(
+        epoch: usize,
+        group_a_name: &str,
+        group_b_name: &str,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::RivalryEnded,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_a_name.to_string()),
+                group_b_name: Some(group_b_name.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -283,6 +357,9 @@ impl EventData {
             members: None,
             new_leader: None,
             old_leader: None,
+            group_b_name: None,
+            rivalry_type: None,
+            old_rivalry_type: None,
         }
     }
 }

@@ -2,6 +2,7 @@
 //!
 //! Groups are detected when 3+ agents have mutual trust above a threshold.
 //! This module analyzes the social belief graph to find emergent alliances.
+//! Inter-group rivalries are detected based on cross-group trust/distrust.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -14,6 +15,12 @@ const TRUST_THRESHOLD: f64 = 0.3;
 
 /// Minimum group size
 const MIN_GROUP_SIZE: usize = 3;
+
+/// Thresholds for inter-group relationship classification
+const HOSTILE_THRESHOLD: f64 = -0.3;
+const TENSE_THRESHOLD: f64 = -0.1;
+const FRIENDLY_THRESHOLD: f64 = 0.1;
+const ALLIED_THRESHOLD: f64 = 0.3;
 
 /// A detected group/alliance
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +45,56 @@ pub struct Group {
     pub hierarchy: Vec<(Uuid, f64)>,
 }
 
+/// Type of inter-group relationship
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RivalryType {
+    /// Groups are actively hostile (avg cross-trust < -0.3)
+    Hostile,
+    /// Groups have tension (avg cross-trust < -0.1)
+    Tense,
+    /// Groups are neutral (avg cross-trust between -0.1 and 0.1)
+    Neutral,
+    /// Groups are friendly (avg cross-trust > 0.1)
+    Friendly,
+    /// Groups are allied (avg cross-trust > 0.3, shared enemies)
+    Allied,
+}
+
+impl RivalryType {
+    pub fn describe(&self) -> &'static str {
+        match self {
+            RivalryType::Hostile => "hostile",
+            RivalryType::Tense => "tense",
+            RivalryType::Neutral => "neutral",
+            RivalryType::Friendly => "friendly",
+            RivalryType::Allied => "allied",
+        }
+    }
+
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, RivalryType::Hostile | RivalryType::Tense)
+    }
+}
+
+/// Relationship between two groups
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rivalry {
+    /// First group ID
+    pub group_a: Uuid,
+    /// Second group ID
+    pub group_b: Uuid,
+    /// Type of relationship
+    pub rivalry_type: RivalryType,
+    /// Average cross-group trust (members of A toward members of B, and vice versa)
+    pub avg_cross_trust: f64,
+    /// Average cross-group sentiment
+    pub avg_cross_sentiment: f64,
+    /// Whether groups share common enemies
+    pub shared_enemies: bool,
+    /// Epoch when this relationship was first detected
+    pub since_epoch: usize,
+}
+
 /// Tracks groups over time
 #[derive(Debug, Clone, Default)]
 pub struct GroupTracker {
@@ -47,6 +104,8 @@ pub struct GroupTracker {
     pub dissolved: Vec<(Group, usize)>, // (group, dissolution_epoch)
     /// Next group number for naming
     next_group_num: usize,
+    /// Current inter-group rivalries
+    pub rivalries: Vec<Rivalry>,
 }
 
 /// Result of group detection for an epoch
@@ -60,6 +119,12 @@ pub struct GroupChanges {
     pub changed: Vec<(Group, Vec<Uuid>, Vec<Uuid>)>, // (group, added, removed)
     /// Groups where leadership changed (group, old_leader, new_leader)
     pub leadership_changed: Vec<(Group, Option<Uuid>, Uuid)>,
+    /// New rivalries detected
+    pub rivalries_formed: Vec<Rivalry>,
+    /// Rivalries that changed type (rivalry, old_type, new_type)
+    pub rivalries_changed: Vec<(Rivalry, RivalryType, RivalryType)>,
+    /// Rivalries that ended (groups no longer both exist)
+    pub rivalries_ended: Vec<Rivalry>,
 }
 
 impl GroupTracker {
@@ -176,7 +241,108 @@ impl GroupTracker {
         // Update active groups
         self.groups = new_groups;
 
+        // Detect inter-group rivalries
+        self.detect_rivalries(agents, epoch, &mut changes);
+
         changes
+    }
+
+    /// Detect rivalries between groups
+    fn detect_rivalries(&mut self, agents: &[Agent], epoch: usize, changes: &mut GroupChanges) {
+        let mut new_rivalries: Vec<Rivalry> = Vec::new();
+
+        // Compare each pair of groups
+        for i in 0..self.groups.len() {
+            for j in (i + 1)..self.groups.len() {
+                let group_a = &self.groups[i];
+                let group_b = &self.groups[j];
+
+                // Calculate cross-group metrics
+                let (avg_trust, avg_sentiment) = calculate_cross_group_metrics(
+                    &group_a.members,
+                    &group_b.members,
+                    agents,
+                );
+
+                // Check for shared enemies
+                let shared_enemies = !group_a
+                    .shared_enemies
+                    .iter()
+                    .filter(|e| group_b.shared_enemies.contains(e))
+                    .next()
+                    .is_none();
+
+                // Classify relationship type
+                let rivalry_type = classify_rivalry(avg_trust, shared_enemies);
+
+                // Only track non-neutral relationships or if shared enemies exist
+                if rivalry_type != RivalryType::Neutral || shared_enemies {
+                    new_rivalries.push(Rivalry {
+                        group_a: group_a.id,
+                        group_b: group_b.id,
+                        rivalry_type,
+                        avg_cross_trust: avg_trust,
+                        avg_cross_sentiment: avg_sentiment,
+                        shared_enemies,
+                        since_epoch: epoch,
+                    });
+                }
+            }
+        }
+
+        // Find new, changed, and ended rivalries
+        let old_rivalries = std::mem::take(&mut self.rivalries);
+
+        for new_rivalry in &mut new_rivalries {
+            // Find matching old rivalry
+            let old_match = old_rivalries.iter().find(|old| {
+                (old.group_a == new_rivalry.group_a && old.group_b == new_rivalry.group_b)
+                    || (old.group_a == new_rivalry.group_b && old.group_b == new_rivalry.group_a)
+            });
+
+            if let Some(old) = old_match {
+                // Keep the original epoch
+                new_rivalry.since_epoch = old.since_epoch;
+
+                // Check if type changed
+                if old.rivalry_type != new_rivalry.rivalry_type {
+                    changes.rivalries_changed.push((
+                        new_rivalry.clone(),
+                        old.rivalry_type,
+                        new_rivalry.rivalry_type,
+                    ));
+                }
+            } else {
+                // New rivalry
+                changes.rivalries_formed.push(new_rivalry.clone());
+            }
+        }
+
+        // Find ended rivalries (old rivalries not in new)
+        for old in &old_rivalries {
+            let still_exists = new_rivalries.iter().any(|new| {
+                (new.group_a == old.group_a && new.group_b == old.group_b)
+                    || (new.group_a == old.group_b && new.group_b == old.group_a)
+            });
+            if !still_exists {
+                changes.rivalries_ended.push(old.clone());
+            }
+        }
+
+        self.rivalries = new_rivalries;
+    }
+
+    /// Get rivalries involving a specific group
+    pub fn rivalries_of(&self, group_id: Uuid) -> Vec<&Rivalry> {
+        self.rivalries
+            .iter()
+            .filter(|r| r.group_a == group_id || r.group_b == group_id)
+            .collect()
+    }
+
+    /// Get all current rivalries
+    pub fn current_rivalries(&self) -> &[Rivalry] {
+        &self.rivalries
     }
 
     /// Get group containing a specific agent
@@ -366,6 +532,64 @@ fn calculate_hierarchy(members: &HashSet<Uuid>, agents: &[Agent]) -> Vec<(Uuid, 
     scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     scores
+}
+
+/// Calculate average trust and sentiment between two groups
+fn calculate_cross_group_metrics(
+    group_a: &HashSet<Uuid>,
+    group_b: &HashSet<Uuid>,
+    agents: &[Agent],
+) -> (f64, f64) {
+    let mut total_trust = 0.0;
+    let mut total_sentiment = 0.0;
+    let mut count = 0;
+
+    // Members of A toward members of B
+    for &member_a in group_a {
+        if let Some(agent_a) = agents.iter().find(|a| a.id == member_a) {
+            for &member_b in group_b {
+                if let Some(belief) = agent_a.beliefs.social.get(&member_b) {
+                    total_trust += belief.trust;
+                    total_sentiment += belief.sentiment;
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    // Members of B toward members of A
+    for &member_b in group_b {
+        if let Some(agent_b) = agents.iter().find(|a| a.id == member_b) {
+            for &member_a in group_a {
+                if let Some(belief) = agent_b.beliefs.social.get(&member_a) {
+                    total_trust += belief.trust;
+                    total_sentiment += belief.sentiment;
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    if count > 0 {
+        (total_trust / count as f64, total_sentiment / count as f64)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+/// Classify the type of inter-group relationship based on cross-trust
+fn classify_rivalry(avg_trust: f64, shared_enemies: bool) -> RivalryType {
+    if avg_trust < HOSTILE_THRESHOLD {
+        RivalryType::Hostile
+    } else if avg_trust < TENSE_THRESHOLD {
+        RivalryType::Tense
+    } else if avg_trust > ALLIED_THRESHOLD || (avg_trust > FRIENDLY_THRESHOLD && shared_enemies) {
+        RivalryType::Allied
+    } else if avg_trust > FRIENDLY_THRESHOLD {
+        RivalryType::Friendly
+    } else {
+        RivalryType::Neutral
+    }
 }
 
 /// Jaccard similarity between two sets

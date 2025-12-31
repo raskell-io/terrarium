@@ -85,6 +85,9 @@ pub enum EventViewType {
     GroupDissolved,
     GroupChanged,
     LeadershipChanged,
+    RivalryFormed,
+    RivalryChanged,
+    RivalryEnded,
     Meta,
 }
 
@@ -341,6 +344,33 @@ impl EventView {
                     format!("{}: {} became leader", group_name, new_leader_name)
                 };
                 (description, EventViewType::LeadershipChanged)
+            }
+            EventType::RivalryFormed => {
+                let group_a = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let group_b = event.data.group_b_name.as_deref().unwrap_or("Unknown");
+                let rivalry_type = event.data.rivalry_type.as_deref().unwrap_or("neutral");
+                (
+                    format!("{} and {} are now {}", group_a, group_b, rivalry_type),
+                    EventViewType::RivalryFormed,
+                )
+            }
+            EventType::RivalryChanged => {
+                let group_a = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let group_b = event.data.group_b_name.as_deref().unwrap_or("Unknown");
+                let old_type = event.data.old_rivalry_type.as_deref().unwrap_or("neutral");
+                let new_type = event.data.rivalry_type.as_deref().unwrap_or("neutral");
+                (
+                    format!("{} and {}: {} → {}", group_a, group_b, old_type, new_type),
+                    EventViewType::RivalryChanged,
+                )
+            }
+            EventType::RivalryEnded => {
+                let group_a = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let group_b = event.data.group_b_name.as_deref().unwrap_or("Unknown");
+                (
+                    format!("{} and {} no longer rivals", group_a, group_b),
+                    EventViewType::RivalryEnded,
+                )
             }
         };
 
