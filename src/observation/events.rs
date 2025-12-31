@@ -1,0 +1,185 @@
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// A simulation event for logging
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    pub epoch: usize,
+    pub event_type: EventType,
+    pub agent: Option<Uuid>,
+    pub target: Option<Uuid>,
+    pub data: EventData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum EventType {
+    // Physical
+    Moved,
+    Gathered,
+    Ate,
+    Rested,
+    HealthChanged,
+    Died,
+
+    // Social
+    Spoke,
+    Gave,
+
+    // Conflict
+    Attacked,
+
+    // Meta
+    EpochStart,
+    EpochEnd,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<(usize, usize)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<(usize, usize)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damage: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl Event {
+    pub fn epoch_start(epoch: usize) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::EpochStart,
+            agent: None,
+            target: None,
+            data: EventData::empty(),
+        }
+    }
+
+    pub fn epoch_end(epoch: usize) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::EpochEnd,
+            agent: None,
+            target: None,
+            data: EventData::empty(),
+        }
+    }
+
+    pub fn moved(epoch: usize, agent: Uuid, from: (usize, usize), to: (usize, usize)) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Moved,
+            agent: Some(agent),
+            target: None,
+            data: EventData {
+                from: Some(from),
+                to: Some(to),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn gathered(epoch: usize, agent: Uuid, amount: u32) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Gathered,
+            agent: Some(agent),
+            target: None,
+            data: EventData {
+                amount: Some(amount),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn ate(epoch: usize, agent: Uuid) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Ate,
+            agent: Some(agent),
+            target: None,
+            data: EventData::empty(),
+        }
+    }
+
+    pub fn rested(epoch: usize, agent: Uuid) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Rested,
+            agent: Some(agent),
+            target: None,
+            data: EventData::empty(),
+        }
+    }
+
+    pub fn spoke(epoch: usize, agent: Uuid, target: Uuid, message: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Spoke,
+            agent: Some(agent),
+            target: Some(target),
+            data: EventData {
+                message: Some(message.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn gave(epoch: usize, agent: Uuid, target: Uuid, amount: u32) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Gave,
+            agent: Some(agent),
+            target: Some(target),
+            data: EventData {
+                amount: Some(amount),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn attacked(epoch: usize, agent: Uuid, target: Uuid, damage: f64) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Attacked,
+            agent: Some(agent),
+            target: Some(target),
+            data: EventData {
+                damage: Some(damage),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn died(epoch: usize, agent: Uuid, cause: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Died,
+            agent: Some(agent),
+            target: None,
+            data: EventData {
+                description: Some(cause.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
+}
+
+impl EventData {
+    pub fn empty() -> Self {
+        Self {
+            from: None,
+            to: None,
+            amount: None,
+            message: None,
+            damage: None,
+            description: None,
+        }
+    }
+}

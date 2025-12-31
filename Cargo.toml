@@ -1,0 +1,45 @@
+[package]
+name = "terrarium"
+version = "0.1.0"
+edition = "2024"
+description = "A societal simulation engine where LLM-powered agents form emergent civilizations"
+license = "MIT"
+repository = "https://github.com/raskell-io/terrarium"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP client for LLM APIs
+reqwest = { version = "0.12", features = ["json"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Random number generation
+rand = "0.9"
+
+# Unique identifiers
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Configuration
+toml = "0.8"
+
+[[bin]]
+name = "terrarium"
+path = "src/main.rs"
