@@ -74,6 +74,10 @@ cat output/chronicle.md
 
 A Dwarf Fortress-inspired terminal viewer with modern keybindings.
 
+<p align="center">
+  <img src="assets/screenshots/tui-viewer.png" alt="TUI Viewer Screenshot" width="800" />
+</p>
+
 | Key | Action |
 |-----|--------|
 | `Space` | Pause / Resume |
