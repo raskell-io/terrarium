@@ -7,6 +7,7 @@ mod action;
 mod agent;
 mod config;
 mod engine;
+mod groups;
 mod llm;
 mod observation;
 mod observer;

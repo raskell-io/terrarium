@@ -81,6 +81,9 @@ pub enum EventViewType {
     Attack,
     Death,
     Gossip,
+    GroupFormed,
+    GroupDissolved,
+    GroupChanged,
     Meta,
 }
 
@@ -298,6 +301,29 @@ impl EventView {
             }
             EventType::HealthChanged => {
                 return None;
+            }
+            EventType::GroupFormed => {
+                let group_name = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let member_count = event.data.members.as_ref().map(|m| m.len()).unwrap_or(0);
+                (
+                    format!("{} formed with {} members", group_name, member_count),
+                    EventViewType::GroupFormed,
+                )
+            }
+            EventType::GroupDissolved => {
+                let group_name = event.data.group_name.as_deref().unwrap_or("Unknown");
+                (
+                    format!("{} dissolved", group_name),
+                    EventViewType::GroupDissolved,
+                )
+            }
+            EventType::GroupChanged => {
+                let group_name = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let description = event.data.description.as_deref().unwrap_or("membership changed");
+                (
+                    format!("{}: {}", group_name, description),
+                    EventViewType::GroupChanged,
+                )
             }
         };
 

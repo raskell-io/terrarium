@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::action::{Action, Direction};
 use crate::agent::{generate_names, Agent, Episode, EpisodeCategory};
 use crate::config::Config;
+use crate::groups::{GroupTracker, Group};
 use crate::llm::LlmClient;
 use crate::observation::{Chronicle, Event};
 use crate::observer::{AgentView, EventView, WorldView};
@@ -22,6 +23,8 @@ pub struct Engine {
     recent_events: Vec<Event>,
     /// Maximum epochs of events to keep
     max_event_epochs: usize,
+    /// Group/alliance tracker
+    group_tracker: GroupTracker,
 }
 
 impl Engine {
@@ -56,6 +59,7 @@ impl Engine {
             chronicle,
             recent_events: Vec::new(),
             max_event_epochs: 10,
+            group_tracker: GroupTracker::new(),
         })
     }
 
@@ -106,6 +110,11 @@ impl Engine {
     /// Get count of living agents
     pub fn alive_count(&self) -> usize {
         self.agents.iter().filter(|a| a.is_alive()).count()
+    }
+
+    /// Get current groups/alliances
+    pub fn current_groups(&self) -> &[Group] {
+        self.group_tracker.current_groups()
     }
 
     /// Step the simulation by one epoch (for TUI control)
@@ -265,6 +274,9 @@ impl Engine {
 
         // 5. Update beliefs based on what happened
         self.update_beliefs(epoch);
+
+        // 6. Detect groups/alliances
+        self.detect_groups(epoch)?;
 
         // Log epoch end
         self.log_and_track(Event::epoch_end(epoch))?;
@@ -650,6 +662,60 @@ impl Engine {
             agent.beliefs.self_belief.perceived_safety =
                 agent.beliefs.self_belief.perceived_safety * 0.9 + 0.5 * 0.1;
         }
+    }
+
+    /// Detect and log group/alliance changes
+    fn detect_groups(&mut self, epoch: usize) -> Result<()> {
+        let changes = self.group_tracker.detect(&self.agents, epoch);
+
+        // Log new groups
+        for group in &changes.formed {
+            let members: Vec<_> = group.members.iter().copied().collect();
+            self.log_and_track(Event::group_formed(epoch, &group.name, members))?;
+            info!(
+                "Group formed: {} with {} members",
+                group.name,
+                group.members.len()
+            );
+        }
+
+        // Log dissolved groups
+        for group in &changes.dissolved {
+            let members: Vec<_> = group.members.iter().copied().collect();
+            self.log_and_track(Event::group_dissolved(epoch, &group.name, members))?;
+            info!("Group dissolved: {}", group.name);
+        }
+
+        // Log membership changes
+        for (group, added, removed) in &changes.changed {
+            let added_names: Vec<_> = added
+                .iter()
+                .filter_map(|id| self.agents.iter().find(|a| a.id == *id))
+                .map(|a| a.name())
+                .collect();
+            let removed_names: Vec<_> = removed
+                .iter()
+                .filter_map(|id| self.agents.iter().find(|a| a.id == *id))
+                .map(|a| a.name())
+                .collect();
+
+            let description = if !added.is_empty() && !removed.is_empty() {
+                format!(
+                    "{} joined, {} left",
+                    added_names.join(", "),
+                    removed_names.join(", ")
+                )
+            } else if !added.is_empty() {
+                format!("{} joined", added_names.join(", "))
+            } else {
+                format!("{} left", removed_names.join(", "))
+            };
+
+            self.log_and_track(Event::group_changed(epoch, &group.name, &description))?;
+            debug!("Group {} changed: {}", group.name, description);
+        }
+
+        Ok(())
     }
 }
 

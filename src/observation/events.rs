@@ -30,6 +30,11 @@ pub enum EventType {
     // Conflict
     Attacked,
 
+    // Groups
+    GroupFormed,
+    GroupDissolved,
+    GroupChanged,
+
     // Meta
     EpochStart,
     EpochEnd,
@@ -52,6 +57,12 @@ pub struct EventData {
     /// Third party in gossip events
     #[serde(skip_serializing_if = "Option::is_none")]
     pub about: Option<Uuid>,
+    /// Group name for group events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_name: Option<String>,
+    /// Member IDs for group events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<Uuid>>,
 }
 
 impl Event {
@@ -187,6 +198,48 @@ impl Event {
             },
         }
     }
+
+    pub fn group_formed(epoch: usize, group_name: &str, members: Vec<Uuid>) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::GroupFormed,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_name.to_string()),
+                members: Some(members),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn group_dissolved(epoch: usize, group_name: &str, members: Vec<Uuid>) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::GroupDissolved,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_name.to_string()),
+                members: Some(members),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn group_changed(epoch: usize, group_name: &str, description: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::GroupChanged,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_name.to_string()),
+                description: Some(description.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -199,6 +252,8 @@ impl EventData {
             damage: None,
             description: None,
             about: None,
+            group_name: None,
+            members: None,
         }
     }
 }

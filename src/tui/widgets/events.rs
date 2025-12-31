@@ -57,6 +57,9 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::Attack => ("!", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             EventViewType::Death => ("†", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             EventViewType::Gossip => ("◊", Style::default().fg(Color::LightMagenta)),
+            EventViewType::GroupFormed => ("★", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            EventViewType::GroupDissolved => ("☆", Style::default().fg(Color::DarkGray)),
+            EventViewType::GroupChanged => ("○", Style::default().fg(Color::Cyan)),
             EventViewType::Meta => ("", Style::default().fg(Color::DarkGray)),
         };
 

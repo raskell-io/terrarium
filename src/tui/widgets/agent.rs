@@ -11,8 +11,11 @@ use ratatui::{
 use crate::observer::AgentView;
 
 /// Draw the agent panel
-pub fn draw(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) {
-    let title = format!(" {} ", agent.name);
+pub fn draw(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool, group_name: Option<&str>) {
+    let title = match group_name {
+        Some(name) => format!(" {} [{}] ", agent.name, name),
+        None => format!(" {} ", agent.name),
+    };
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)

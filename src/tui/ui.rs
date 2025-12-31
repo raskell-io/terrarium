@@ -85,7 +85,13 @@ fn draw_events(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 fn draw_agent(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
     if let Some(id) = app.selected_agent {
         if let Some(agent_view) = engine.agent_view(id) {
-            widgets::agent::draw(frame, area, &agent_view, app.show_full_agent);
+            // Find if agent is in a group
+            let group_name = engine
+                .current_groups()
+                .iter()
+                .find(|g| g.members.contains(&id))
+                .map(|g| g.name.as_str());
+            widgets::agent::draw(frame, area, &agent_view, app.show_full_agent, group_name);
         }
     } else {
         // No agent selected
@@ -138,10 +144,11 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
         Span::raw("  "),
         Span::styled(status, status_style),
         Span::raw(format!(
-            "  Day {} / {}  Alive: {}  [{}]",
+            "  Day {} / {}  Alive: {}  Groups: {}  [{}]",
             engine.epoch(),
             engine.total_epochs(),
             engine.alive_count(),
+            engine.current_groups().len(),
             speed_text,
         )),
     ]);
