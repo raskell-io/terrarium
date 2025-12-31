@@ -4,7 +4,7 @@
 
 ## Project Status
 
-**Phase**: MVP Development (Tribe Scale)
+**Phase**: MVP Complete + TUI Client Development
 
 ## Core Design Decisions
 
@@ -121,9 +121,41 @@ for each epoch:
 
 **Duration**: 100 epochs
 
-**Output**: Logs only (no UI)
+**Output**: Events log + Chronicle + State snapshots + TUI viewer
 
 **Scenario**: "First Winter" - scarcity pressure without instant death
+
+## Observer Architecture
+
+The simulation engine is separated from observation clients. See `docs/OBSERVER_PROTOCOL.md`.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  SIMULATION ENGINE                      │
+│  World state, Agent states, Event stream                │
+└──────────────────────────┬──────────────────────────────┘
+                           │ Observer Protocol
+           ┌───────────────┼───────────────┐
+           ▼               ▼               ▼
+      ┌─────────┐    ┌─────────┐    ┌─────────┐
+      │   TUI   │    │ Web UI  │    │  Query  │
+      │ Client  │    │ (future)│    │   CLI   │
+      └─────────┘    └─────────┘    └─────────┘
+```
+
+### Observer Interface
+
+Clients can access:
+- `world_view()` - Current world state (grid, terrain, resources, occupants)
+- `agent_views()` - All agent states (physical, cognitive, social)
+- `recent_events()` - Events from recent epochs
+- Simulation control (pause, step, resume)
+
+### Client Modes
+
+1. **Embedded** - Client runs engine directly (TUI)
+2. **Replay** - Client reads from saved files (analysis tools)
+3. **Live** - Client connects to running simulation (future: WebSocket)
 
 ## File Structure
 
@@ -140,9 +172,15 @@ terrarium/
 │   │   └── memory.rs     # Episode storage, consolidation
 │   ├── action.rs         # Action types and resolution
 │   ├── llm.rs            # LLM integration
-│   └── observation/
-│       ├── events.rs     # Event types
-│       └── chronicle.rs  # Narrative generation
+│   ├── observer.rs       # Observer protocol (views)
+│   ├── observation/
+│   │   ├── events.rs     # Event types
+│   │   └── chronicle.rs  # Narrative generation
+│   └── tui/              # Terminal UI client
+│       ├── mod.rs        # TUI entry point
+│       ├── app.rs        # Application state
+│       ├── ui.rs         # Rendering
+│       └── input.rs      # Key handling
 ├── scenarios/
 │   └── first_winter.toml
 ├── output/               # Generated
@@ -150,9 +188,11 @@ terrarium/
 │   ├── states/
 │   └── chronicle.md
 └── docs/
-    ├── CONCEPT.md        # Vision and philosophy
-    ├── ARCHITECTURE.md   # Technical decisions
-    └── MVP.md            # Current scope
+    ├── CONCEPT.md           # Vision and philosophy
+    ├── ARCHITECTURE.md      # Technical decisions
+    ├── MVP.md               # MVP scope
+    ├── OBSERVER_PROTOCOL.md # Client interface
+    └── TUI.md               # TUI client spec
 ```
 
 ## Key Implementation Notes
@@ -217,8 +257,11 @@ INTERNAL:   goal_changed, belief_updated (if logging thoughts)
 # Build
 cargo build --release
 
-# Run MVP scenario
+# Run headless (batch mode, writes to output/)
 ./target/release/terrarium --scenario scenarios/first_winter.toml
+
+# Run with TUI viewer
+./target/release/terrarium --scenario scenarios/first_winter.toml --tui
 
 # Run with debug logging
 RUST_LOG=debug ./target/release/terrarium --scenario scenarios/first_winter.toml
@@ -230,6 +273,7 @@ RUST_LOG=debug ./target/release/terrarium --scenario scenarios/first_winter.toml
 - **LLM**: Claude API (provider-agnostic interface)
 - **Storage**: JSON files for MVP (event sourcing)
 - **Config**: TOML
+- **TUI**: ratatui + crossterm
 
 ## Open Questions (for future phases)
 
