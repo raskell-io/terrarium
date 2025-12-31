@@ -60,6 +60,7 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::GroupFormed => ("★", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             EventViewType::GroupDissolved => ("☆", Style::default().fg(Color::DarkGray)),
             EventViewType::GroupChanged => ("○", Style::default().fg(Color::Cyan)),
+            EventViewType::LeadershipChanged => ("♛", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             EventViewType::Meta => ("", Style::default().fg(Color::DarkGray)),
         };
 

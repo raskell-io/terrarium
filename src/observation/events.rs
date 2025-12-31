@@ -34,6 +34,7 @@ pub enum EventType {
     GroupFormed,
     GroupDissolved,
     GroupChanged,
+    LeadershipChanged,
 
     // Meta
     EpochStart,
@@ -63,6 +64,12 @@ pub struct EventData {
     /// Member IDs for group events
     #[serde(skip_serializing_if = "Option::is_none")]
     pub members: Option<Vec<Uuid>>,
+    /// New leader for leadership change events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_leader: Option<Uuid>,
+    /// Old leader for leadership change events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_leader: Option<Uuid>,
 }
 
 impl Event {
@@ -240,6 +247,26 @@ impl Event {
             },
         }
     }
+
+    pub fn leadership_changed(
+        epoch: usize,
+        group_name: &str,
+        old_leader: Option<Uuid>,
+        new_leader: Uuid,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::LeadershipChanged,
+            agent: None,
+            target: None,
+            data: EventData {
+                group_name: Some(group_name.to_string()),
+                old_leader,
+                new_leader: Some(new_leader),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -254,6 +281,8 @@ impl EventData {
             about: None,
             group_name: None,
             members: None,
+            new_leader: None,
+            old_leader: None,
         }
     }
 }

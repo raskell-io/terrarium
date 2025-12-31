@@ -715,6 +715,36 @@ impl Engine {
             debug!("Group {} changed: {}", group.name, description);
         }
 
+        // Log leadership changes
+        for (group, old_leader, new_leader) in &changes.leadership_changed {
+            self.log_and_track(Event::leadership_changed(
+                epoch,
+                &group.name,
+                *old_leader,
+                *new_leader,
+            ))?;
+
+            let new_leader_name = self
+                .agents
+                .iter()
+                .find(|a| a.id == *new_leader)
+                .map(|a| a.name())
+                .unwrap_or("Unknown");
+
+            let old_leader_name = old_leader
+                .and_then(|id| self.agents.iter().find(|a| a.id == id))
+                .map(|a| a.name());
+
+            if let Some(old_name) = old_leader_name {
+                info!(
+                    "{}: {} succeeded {} as leader",
+                    group.name, new_leader_name, old_name
+                );
+            } else {
+                info!("{}: {} became leader", group.name, new_leader_name);
+            }
+        }
+
         Ok(())
     }
 }

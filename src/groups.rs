@@ -32,6 +32,10 @@ pub struct Group {
     pub shared_enemies: Vec<Uuid>,
     /// Human-readable group name (generated)
     pub name: String,
+    /// Detected leader (highest leadership score)
+    pub leader: Option<Uuid>,
+    /// Members ranked by leadership score (descending)
+    pub hierarchy: Vec<(Uuid, f64)>,
 }
 
 /// Tracks groups over time
@@ -54,6 +58,8 @@ pub struct GroupChanges {
     pub dissolved: Vec<Group>,
     /// Groups that changed membership
     pub changed: Vec<(Group, Vec<Uuid>, Vec<Uuid>)>, // (group, added, removed)
+    /// Groups where leadership changed (group, old_leader, new_leader)
+    pub leadership_changed: Vec<(Group, Option<Uuid>, Uuid)>,
 }
 
 impl GroupTracker {
@@ -78,6 +84,8 @@ impl GroupTracker {
             .map(|members| {
                 let (avg_trust, avg_sentiment) = calculate_group_metrics(&members, agents);
                 let shared_enemies = find_shared_enemies(&members, agents);
+                let hierarchy = calculate_hierarchy(&members, agents);
+                let leader = hierarchy.first().map(|(id, _)| *id);
 
                 Group {
                     id: Uuid::new_v4(),
@@ -87,6 +95,8 @@ impl GroupTracker {
                     average_sentiment: avg_sentiment,
                     shared_enemies,
                     name: String::new(), // Will be set below
+                    leader,
+                    hierarchy,
                 }
             })
             .collect();
@@ -127,6 +137,17 @@ impl GroupTracker {
 
                 if !added.is_empty() || !removed.is_empty() {
                     changes.changed.push((new_group.clone(), added, removed));
+                }
+
+                // Check for leadership changes
+                if new_group.leader != old_group.leader {
+                    if let Some(new_leader) = new_group.leader {
+                        changes.leadership_changed.push((
+                            new_group.clone(),
+                            old_group.leader,
+                            new_leader,
+                        ));
+                    }
                 }
 
                 matched_old.insert(old_group.id);
@@ -308,6 +329,43 @@ fn find_shared_enemies(members: &HashSet<Uuid>, agents: &[Agent]) -> Vec<Uuid> {
         .filter(|(_, count)| *count == members.len())
         .map(|(id, _)| id)
         .collect()
+}
+
+/// Calculate leadership hierarchy within a group
+/// Leadership score = sum of incoming trust from other group members
+/// Higher score = more trusted by peers = more likely to be leader
+fn calculate_hierarchy(members: &HashSet<Uuid>, agents: &[Agent]) -> Vec<(Uuid, f64)> {
+    let mut scores: Vec<(Uuid, f64)> = members
+        .iter()
+        .map(|&member_id| {
+            // Calculate incoming trust from other group members
+            let incoming_trust: f64 = members
+                .iter()
+                .filter(|&&other_id| other_id != member_id)
+                .filter_map(|&other_id| {
+                    agents
+                        .iter()
+                        .find(|a| a.id == other_id)
+                        .and_then(|other| other.beliefs.social.get(&member_id))
+                        .map(|belief| belief.trust)
+                })
+                .sum();
+
+            // Optionally factor in personality (extraversion)
+            let extraversion_bonus = agents
+                .iter()
+                .find(|a| a.id == member_id)
+                .map(|a| a.identity.personality.extraversion * 0.2)
+                .unwrap_or(0.0);
+
+            (member_id, incoming_trust + extraversion_bonus)
+        })
+        .collect();
+
+    // Sort by score descending
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    scores
 }
 
 /// Jaccard similarity between two sets

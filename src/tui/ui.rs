@@ -85,13 +85,13 @@ fn draw_events(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 fn draw_agent(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
     if let Some(id) = app.selected_agent {
         if let Some(agent_view) = engine.agent_view(id) {
-            // Find if agent is in a group
-            let group_name = engine
+            // Find if agent is in a group and if they're the leader
+            let group_info = engine
                 .current_groups()
                 .iter()
                 .find(|g| g.members.contains(&id))
-                .map(|g| g.name.as_str());
-            widgets::agent::draw(frame, area, &agent_view, app.show_full_agent, group_name);
+                .map(|g| (g.name.as_str(), g.leader == Some(id)));
+            widgets::agent::draw(frame, area, &agent_view, app.show_full_agent, group_info);
         }
     } else {
         // No agent selected

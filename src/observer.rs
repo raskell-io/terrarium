@@ -84,6 +84,7 @@ pub enum EventViewType {
     GroupFormed,
     GroupDissolved,
     GroupChanged,
+    LeadershipChanged,
     Meta,
 }
 
@@ -324,6 +325,22 @@ impl EventView {
                     format!("{}: {}", group_name, description),
                     EventViewType::GroupChanged,
                 )
+            }
+            EventType::LeadershipChanged => {
+                let group_name = event.data.group_name.as_deref().unwrap_or("Unknown");
+                let new_leader_name = event
+                    .data
+                    .new_leader
+                    .map(agent_name)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let old_leader_name = event.data.old_leader.map(agent_name);
+
+                let description = if let Some(old_name) = old_leader_name {
+                    format!("{}: {} succeeded {} as leader", group_name, new_leader_name, old_name)
+                } else {
+                    format!("{}: {} became leader", group_name, new_leader_name)
+                };
+                (description, EventViewType::LeadershipChanged)
             }
         };
 
