@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::config::AgingConfig;
+
 /// A single agent in the simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
@@ -60,6 +62,8 @@ pub struct FamilyRelations {
     pub children: Vec<Uuid>,
     /// Mate history
     pub mate_history: Vec<Uuid>,
+    /// Generation number (0 for originals, increments for offspring)
+    pub generation: usize,
 }
 
 /// Physical state of an agent
@@ -75,6 +79,8 @@ pub struct PhysicalState {
     pub energy: f64,
     /// Food carried
     pub food: u32,
+    /// Age in epochs
+    pub age: usize,
 }
 
 /// Current active goal
@@ -104,6 +110,7 @@ impl Agent {
                 hunger: 0.3, // Slightly hungry to start
                 energy: 1.0,
                 food: starting_food,
+                age: 0,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState::default(),
@@ -117,6 +124,7 @@ impl Agent {
         y: usize,
         starting_food: u32,
         parents: Vec<Uuid>,
+        generation: usize,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -130,6 +138,7 @@ impl Agent {
                 hunger: 0.2, // Newborns start less hungry
                 energy: 0.8,
                 food: starting_food,
+                age: 0,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState {
@@ -137,6 +146,7 @@ impl Agent {
                     parents,
                     children: Vec::new(),
                     mate_history: Vec::new(),
+                    generation,
                 },
                 ..Default::default()
             },
@@ -151,6 +161,56 @@ impl Agent {
     /// Get agent's name
     pub fn name(&self) -> &str {
         &self.identity.name
+    }
+
+    /// Get agent's age
+    pub fn age(&self) -> usize {
+        self.physical.age
+    }
+
+    /// Calculate age-based capability modifier (0.5 to 1.0)
+    /// Youth: 0.7 to 1.0, Prime: 1.0, Elderly/Ancient: 1.0 to 0.5
+    pub fn age_modifier(&self, config: &AgingConfig) -> f64 {
+        if !config.enabled || !config.capability_affects_actions {
+            return 1.0;
+        }
+
+        let age = self.physical.age;
+
+        if age < config.youth_end {
+            // Youth: starts at 0.7, grows to 1.0 by end of youth
+            0.7 + 0.3 * (age as f64 / config.youth_end as f64)
+        } else if age < config.prime_end {
+            // Prime: 100% capability
+            1.0
+        } else if age < config.max_lifespan {
+            // Elderly/Ancient: linear decline from 1.0 to 0.5
+            let decline_progress = (age - config.prime_end) as f64
+                / (config.max_lifespan - config.prime_end) as f64;
+            1.0 - (decline_progress * 0.5)
+        } else {
+            // Beyond max lifespan (shouldn't happen, but cap at 0.5)
+            0.5
+        }
+    }
+
+    /// Get the current life stage as a string
+    pub fn life_stage(&self, config: &AgingConfig) -> &'static str {
+        if !config.enabled {
+            return "ageless";
+        }
+
+        let age = self.physical.age;
+
+        if age < config.youth_end {
+            "youth"
+        } else if age < config.prime_end {
+            "prime"
+        } else if age < config.elderly_start + (config.max_lifespan - config.elderly_start) / 2 {
+            "elderly"
+        } else {
+            "ancient"
+        }
     }
 
     /// Update hunger (called each epoch)
@@ -236,9 +296,20 @@ impl Agent {
             "barely able to move"
         };
 
+        // Age description
+        let aging_config = AgingConfig::default();
+        let life_stage = self.life_stage(&aging_config);
+        let age_desc = match life_stage {
+            "youth" => format!("You are young ({} days old), still developing your strength", self.physical.age),
+            "prime" => format!("You are in your prime ({} days old), at peak capability", self.physical.age),
+            "elderly" => format!("You are elderly ({} days old), feeling your age", self.physical.age),
+            "ancient" => format!("You are ancient ({} days old), your body is failing", self.physical.age),
+            _ => format!("You are {} days old", self.physical.age),
+        };
+
         let physical = format!(
-            "Physical state: You are {}, {}, and {}. You carry {} food.",
-            health_desc, hunger_desc, energy_desc, self.physical.food
+            "Physical state: {}. You are {}, {}, and {}. You carry {} food.",
+            age_desc, health_desc, hunger_desc, energy_desc, self.physical.food
         );
 
         let goal = match &self.active_goal {

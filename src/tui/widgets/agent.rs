@@ -119,9 +119,27 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
         .label(format!("{}%", energy_pct));
     frame.render_widget(energy_gauge, chunks[2]);
 
-    // Position and inventory
+    // Position, age, and inventory
+    let age_color = match agent.life_stage.as_str() {
+        "youth" => Color::LightCyan,
+        "prime" => Color::Green,
+        "elderly" => Color::Yellow,
+        "ancient" => Color::Red,
+        _ => Color::White,
+    };
+    let gen_display = if agent.generation > 0 {
+        format!(" Gen {}", agent.generation)
+    } else {
+        String::new()
+    };
     let info = Line::from(vec![
-        Span::raw("Position: "),
+        Span::raw("Age: "),
+        Span::styled(
+            format!("{} ({})", agent.age, agent.life_stage),
+            Style::default().fg(age_color),
+        ),
+        Span::styled(gen_display, Style::default().fg(Color::Magenta)),
+        Span::raw("  Pos: "),
         Span::styled(
             format!("({}, {})", agent.position.0, agent.position.1),
             Style::default().fg(Color::Cyan),

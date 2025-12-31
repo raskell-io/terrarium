@@ -89,7 +89,7 @@ impl Engine {
     pub fn agent_views(&self) -> Vec<AgentView> {
         self.agents
             .iter()
-            .map(|a| AgentView::from_agent(a, &self.agents))
+            .map(|a| AgentView::from_agent(a, &self.agents, &self.config.aging))
             .collect()
     }
 
@@ -98,7 +98,7 @@ impl Engine {
         self.agents
             .iter()
             .find(|a| a.id == id)
-            .map(|a| AgentView::from_agent(a, &self.agents))
+            .map(|a| AgentView::from_agent(a, &self.agents, &self.config.aging))
     }
 
     /// Get recent events as views
@@ -333,10 +333,13 @@ impl Engine {
         self.tick_courtship_decay();
         self.process_births();
 
-        // 7. Update beliefs based on what happened
+        // 7. Tick aging (after reproduction so newborns get their first epoch)
+        self.tick_aging(epoch)?;
+
+        // 8. Update beliefs based on what happened
         self.update_beliefs(epoch);
 
-        // 8. Detect groups/alliances
+        // 9. Detect groups/alliances
         self.detect_groups(epoch)?;
 
         // Log epoch end
@@ -356,7 +359,8 @@ impl Engine {
     fn resolve_actions(&mut self, epoch: usize, actions: HashMap<Uuid, Action>) -> Result<()> {
         // Get environment state for movement cost
         let env_state = self.environment.state_at(epoch);
-        let movement_cost = 0.05 * env_state.movement_cost;
+        let base_movement_cost = 0.05 * env_state.movement_cost;
+        let aging_config = self.config.aging.clone();
 
         // Collect gather actions per cell for splitting
         let mut gathers_per_cell: HashMap<(usize, usize), Vec<Uuid>> = HashMap::new();
@@ -381,11 +385,14 @@ impl Engine {
 
             match action {
                 Action::Wait => {
+                    let age_mod = self.agents[agent_idx].age_modifier(&aging_config);
+                    let recovery = 0.05 * age_mod;
                     self.agents[agent_idx].physical.energy =
-                        (self.agents[agent_idx].physical.energy + 0.05).min(1.0);
+                        (self.agents[agent_idx].physical.energy + recovery).min(1.0);
                 }
 
                 Action::Move(dir) => {
+                    let age_mod = self.agents[agent_idx].age_modifier(&aging_config);
                     let agent = &mut self.agents[agent_idx];
                     let (dx, dy) = dir.delta();
                     let new_x = (agent.physical.x as i32 + dx).max(0) as usize;
@@ -395,7 +402,8 @@ impl Engine {
                         let from = (agent.physical.x, agent.physical.y);
                         agent.physical.x = new_x;
                         agent.physical.y = new_y;
-                        // Movement cost affected by environment (harsh conditions = more effort)
+                        // Movement cost affected by environment and age (elderly use more energy)
+                        let movement_cost = base_movement_cost / age_mod;
                         agent.physical.energy = (agent.physical.energy - movement_cost).max(0.0);
 
                         self.log_and_track(Event::moved(
@@ -408,15 +416,16 @@ impl Engine {
                 }
 
                 Action::Gather => {
+                    let age_mod = self.agents[agent_idx].age_modifier(&aging_config);
                     let agent = &self.agents[agent_idx];
                     let pos = (agent.physical.x, agent.physical.y);
 
                     // How many agents are gathering here?
                     let num_gatherers = gathers_per_cell.get(&pos).map(|v| v.len()).unwrap_or(1);
 
-                    // Split the take amount
-                    let max_take = 5 / num_gatherers as u32;
-                    let max_take = max_take.max(1);
+                    // Split the take amount, modified by age (elderly gather less)
+                    let base_max = 5 / num_gatherers as u32;
+                    let max_take = ((base_max as f64 * age_mod).round() as u32).max(1);
 
                     // Take food from cell
                     let (taken, remaining_food) = if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
@@ -428,8 +437,10 @@ impl Engine {
 
                     if taken > 0 {
                         self.agents[agent_idx].add_food(taken);
+                        // Gathering energy cost affected by age (elderly use more energy)
+                        let gather_cost = 0.1 / age_mod;
                         self.agents[agent_idx].physical.energy =
-                            (self.agents[agent_idx].physical.energy - 0.1).max(0.0);
+                            (self.agents[agent_idx].physical.energy - gather_cost).max(0.0);
 
                         self.log_and_track(Event::gathered(epoch, agent_id, taken))?;
 
@@ -454,7 +465,11 @@ impl Engine {
                 }
 
                 Action::Rest => {
-                    self.agents[agent_idx].rest();
+                    // Rest recovery affected by age
+                    let age_mod = self.agents[agent_idx].age_modifier(&aging_config);
+                    let recovery = 0.3 * age_mod;
+                    self.agents[agent_idx].physical.energy =
+                        (self.agents[agent_idx].physical.energy + recovery).min(1.0);
                     self.log_and_track(Event::rested(epoch, agent_id))?;
                 }
 
@@ -987,6 +1002,54 @@ impl Engine {
         Ok(())
     }
 
+    // ==================== Aging System ====================
+
+    /// Tick aging: increment age for all agents and check for natural death
+    fn tick_aging(&mut self, epoch: usize) -> Result<()> {
+        if !self.config.aging.enabled {
+            return Ok(());
+        }
+
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let aging_config = &self.config.aging;
+
+        let mut death_events = Vec::new();
+
+        for agent in &mut self.agents {
+            if !agent.is_alive() {
+                continue;
+            }
+
+            // Increment age
+            agent.physical.age += 1;
+            let age = agent.physical.age;
+
+            // Check for natural death
+            if age >= aging_config.max_lifespan {
+                // Certain death at max lifespan
+                agent.physical.health = 0.0;
+                death_events.push(Event::died(epoch, agent.id, "old age"));
+            } else if age >= aging_config.elderly_start {
+                // Probabilistic death after elderly_start
+                let age_factor = (age - aging_config.elderly_start) as f64
+                    / (aging_config.max_lifespan - aging_config.elderly_start) as f64;
+                let death_probability = aging_config.death_probability_rate * age_factor;
+
+                if rng.random::<f64>() < death_probability {
+                    agent.physical.health = 0.0;
+                    death_events.push(Event::died(epoch, agent.id, "old age"));
+                }
+            }
+        }
+
+        for event in death_events {
+            self.log_and_track(event)?;
+        }
+
+        Ok(())
+    }
+
     // ==================== Reproduction System ====================
 
     /// Tick gestations: energy drain during pregnancy, check for births
@@ -1032,6 +1095,15 @@ impl Engine {
             let carrier = &self.agents[carrier_idx];
             let spawn_pos = self.find_adjacent_spawn(carrier.physical.x, carrier.physical.y);
 
+            // Calculate generation (max of parents + 1)
+            let carrier_gen = self.agents[carrier_idx].reproduction.family.generation;
+            let partner_gen = self.agents
+                .iter()
+                .find(|a| a.id == partner_id)
+                .map(|a| a.reproduction.family.generation)
+                .unwrap_or(0);
+            let offspring_generation = carrier_gen.max(partner_gen) + 1;
+
             // Create the child
             let child = Agent::new_with_identity(
                 offspring_identity,
@@ -1039,6 +1111,7 @@ impl Engine {
                 spawn_pos.1,
                 starting_food,
                 vec![carrier_id, partner_id],
+                offspring_generation,
             );
             let child_id = child.id;
             let child_name = child.name().to_string();

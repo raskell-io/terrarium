@@ -18,6 +18,8 @@ pub struct Config {
     pub environment: Option<EnvironmentConfig>,
     #[serde(default)]
     pub reproduction: ReproductionConfig,
+    #[serde(default)]
+    pub aging: AgingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +114,54 @@ fn default_offspring_starting_food() -> u32 { 5 }
 fn default_min_health_to_reproduce() -> f64 { 0.5 }
 fn default_min_energy_to_reproduce() -> f64 { 0.4 }
 
+/// Aging system configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgingConfig {
+    /// Whether aging is enabled
+    #[serde(default = "default_aging_enabled")]
+    pub enabled: bool,
+    /// End of youth period (still developing)
+    #[serde(default = "default_youth_end")]
+    pub youth_end: usize,
+    /// End of prime period (peak performance)
+    #[serde(default = "default_prime_end")]
+    pub prime_end: usize,
+    /// Start of elderly period (when death probability begins)
+    #[serde(default = "default_elderly_start")]
+    pub elderly_start: usize,
+    /// Maximum lifespan (certain death)
+    #[serde(default = "default_max_lifespan")]
+    pub max_lifespan: usize,
+    /// Base probability of death per epoch after elderly_start
+    #[serde(default = "default_death_probability_rate")]
+    pub death_probability_rate: f64,
+    /// Whether age affects action effectiveness
+    #[serde(default = "default_capability_affects_actions")]
+    pub capability_affects_actions: bool,
+}
+
+impl Default for AgingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            youth_end: 15,
+            prime_end: 60,
+            elderly_start: 60,
+            max_lifespan: 150,
+            death_probability_rate: 0.02,
+            capability_affects_actions: true,
+        }
+    }
+}
+
+fn default_aging_enabled() -> bool { true }
+fn default_youth_end() -> usize { 15 }
+fn default_prime_end() -> usize { 60 }
+fn default_elderly_start() -> usize { 60 }
+fn default_max_lifespan() -> usize { 150 }
+fn default_death_probability_rate() -> f64 { 0.02 }
+fn default_capability_affects_actions() -> bool { true }
+
 fn default_personality() -> String {
     "random".to_string()
 }
@@ -160,6 +210,7 @@ impl Default for Config {
             llm: LlmConfig::default(),
             environment: None,
             reproduction: ReproductionConfig::default(),
+            aging: AgingConfig::default(),
         }
     }
 }

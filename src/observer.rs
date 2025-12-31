@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::agent::{Agent, Goal};
+use crate::config::AgingConfig;
 use crate::observation::{Event, EventType};
 use crate::world::{Terrain, World};
 
@@ -42,6 +43,11 @@ pub struct AgentView {
     pub energy: f64,
     pub food: u32,
     pub alive: bool,
+
+    // Aging
+    pub age: usize,
+    pub life_stage: String,
+    pub generation: usize,
 
     // Identity
     pub personality_summary: String,
@@ -149,7 +155,7 @@ impl WorldView {
 
 impl AgentView {
     /// Create an agent view from an agent
-    pub fn from_agent(agent: &Agent, agents: &[Agent]) -> Self {
+    pub fn from_agent(agent: &Agent, agents: &[Agent], aging_config: &AgingConfig) -> Self {
         // Build personality summary
         let p = &agent.identity.personality;
         let mut traits = Vec::new();
@@ -257,6 +263,9 @@ impl AgentView {
             energy: agent.physical.energy,
             food: agent.physical.food,
             alive: agent.is_alive(),
+            age: agent.physical.age,
+            life_stage: agent.life_stage(aging_config).to_string(),
+            generation: agent.reproduction.family.generation,
             personality_summary,
             aspiration: agent.identity.aspiration.describe().to_string(),
             current_goal: agent.active_goal.as_ref().map(|g| g.describe().to_string()),
