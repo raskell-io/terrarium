@@ -20,6 +20,8 @@ pub enum Action {
     Give { target: Uuid, amount: u32 },
     /// Attack a nearby agent
     Attack { target: Uuid },
+    /// Share opinion about another agent (gossip)
+    Gossip { target: Uuid, about: Uuid },
 }
 
 /// Movement directions (8-directional)
@@ -132,6 +134,21 @@ impl Action {
                     None
                 }
             }
+            "GOSSIP" => {
+                // GOSSIP <target> <about>
+                if words.len() >= 3 {
+                    let target_name = words[1].to_lowercase();
+                    let about_name = words[2].to_lowercase();
+                    let target = find_agent_by_name(&target_name, nearby_agents);
+                    let about = find_agent_by_name(&about_name, nearby_agents);
+                    match (target, about) {
+                        (Some(t), Some(a)) if t != a => Some(Action::Gossip { target: t, about: a }),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -156,6 +173,11 @@ impl Action {
                 let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
                 format!("{} attacks {}", agent_name, target_name)
             }
+            Action::Gossip { target, about } => {
+                let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
+                let about_name = find_name_by_id(*about, agents).unwrap_or("someone");
+                format!("{} gossips to {} about {}", agent_name, target_name, about_name)
+            }
         }
     }
 
@@ -173,6 +195,9 @@ impl Action {
             actions.push("SPEAK <name> <message> - say something to someone nearby");
             actions.push("GIVE <name> <amount> - give food to someone nearby");
             actions.push("ATTACK <name> - attack someone nearby");
+            if nearby_agents.len() >= 2 {
+                actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>");
+            }
         }
 
         actions.join("\n")

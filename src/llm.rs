@@ -221,6 +221,40 @@ fn heuristic_action(agent: &Agent, nearby_agents: &[(uuid::Uuid, &str)]) -> Acti
         return Action::Give { target, amount: 1 };
     }
 
+    // Priority 5: Gossip if extraverted and have opinions to share
+    if agent.identity.personality.extraversion > 0.5
+        && nearby_agents.len() >= 2
+        && rng.random::<f64>() < 0.3  // 30% chance
+    {
+        // Find someone we have strong feelings about
+        let gossip_subject = agent.beliefs.social.iter()
+            .filter(|(id, belief)| {
+                // Strong feelings (positive or negative)
+                (belief.trust.abs() > 0.3 || belief.sentiment.abs() > 0.3)
+                    // Subject is nearby
+                    && nearby_agents.iter().any(|(nid, _)| nid == *id)
+            })
+            .max_by(|(_, a), (_, b)| {
+                // Prefer strongest feelings
+                let a_strength = a.trust.abs() + a.sentiment.abs();
+                let b_strength = b.trust.abs() + b.sentiment.abs();
+                a_strength.partial_cmp(&b_strength).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(id, _)| *id);
+
+        if let Some(about) = gossip_subject {
+            // Find a target to gossip to (not the subject)
+            let potential_targets: Vec<_> = nearby_agents.iter()
+                .filter(|(id, _)| *id != about)
+                .collect();
+
+            if !potential_targets.is_empty() {
+                let (target, _) = potential_targets[rng.random_range(0..potential_targets.len())];
+                return Action::Gossip { target: *target, about };
+            }
+        }
+    }
+
     // Otherwise: random action
     match rng.random_range(0..10) {
         0..=4 => {

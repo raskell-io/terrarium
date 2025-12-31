@@ -80,6 +80,7 @@ pub enum EventViewType {
     Gift,
     Attack,
     Death,
+    Gossip,
     Meta,
 }
 
@@ -283,6 +284,16 @@ impl EventView {
                 (
                     format!("{} died from {}", name, cause),
                     EventViewType::Death,
+                )
+            }
+            EventType::Gossiped => {
+                let name = agent_name(event.agent?);
+                let target_name = agent_name(event.target?);
+                let about_name = event.data.about.map(agent_name).unwrap_or_else(|| "someone".to_string());
+                let sentiment = event.data.description.as_deref().unwrap_or("neutral");
+                (
+                    format!("{} told {} ({}) things about {}", name, target_name, sentiment, about_name),
+                    EventViewType::Gossip,
                 )
             }
             EventType::HealthChanged => {

@@ -25,6 +25,7 @@ pub enum EventType {
     // Social
     Spoke,
     Gave,
+    Gossiped,
 
     // Conflict
     Attacked,
@@ -48,6 +49,9 @@ pub struct EventData {
     pub damage: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Third party in gossip events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub about: Option<Uuid>,
 }
 
 impl Event {
@@ -169,6 +173,20 @@ impl Event {
             },
         }
     }
+
+    pub fn gossiped(epoch: usize, agent: Uuid, target: Uuid, about: Uuid, sentiment: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Gossiped,
+            agent: Some(agent),
+            target: Some(target),
+            data: EventData {
+                about: Some(about),
+                description: Some(sentiment.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -180,6 +198,7 @@ impl EventData {
             message: None,
             damage: None,
             description: None,
+            about: None,
         }
     }
 }

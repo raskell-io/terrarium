@@ -549,6 +549,77 @@ impl Engine {
                         }
                     }
                 }
+
+                Action::Gossip { target, about } => {
+                    let target_idx = self.agents.iter().position(|a| a.id == target);
+                    let about_idx = self.agents.iter().position(|a| a.id == about);
+
+                    if let (Some(target_idx), Some(about_idx)) = (target_idx, about_idx) {
+                        let agent = &self.agents[agent_idx];
+                        let target_agent = &self.agents[target_idx];
+
+                        if is_adjacent(agent, target_agent) && target_agent.is_alive() {
+                            // Get the gossiper's beliefs about the subject
+                            let (gossiper_trust, gossiper_sentiment) = self.agents[agent_idx]
+                                .beliefs
+                                .get_social(about)
+                                .map(|b| (b.trust, b.sentiment))
+                                .unwrap_or((0.0, 0.0));
+
+                            let agent_name = self.agents[agent_idx].name().to_string();
+                            let target_name = self.agents[target_idx].name().to_string();
+                            let about_name = self.agents[about_idx].name().to_string();
+
+                            // Target receives the gossip and updates their belief
+                            let sentiment_desc = self.agents[target_idx].beliefs.receive_gossip(
+                                agent_id,
+                                about,
+                                &about_name,
+                                gossiper_trust,
+                                gossiper_sentiment,
+                                epoch,
+                            );
+
+                            // Log the gossip event
+                            self.log_and_track(Event::gossiped(
+                                epoch,
+                                agent_id,
+                                target,
+                                about,
+                                &sentiment_desc,
+                            ))?;
+
+                            // Both agents remember the gossip
+                            self.agents[agent_idx].memory.remember(Episode::social(
+                                epoch,
+                                &format!("I told {} about {}", target_name, about_name),
+                                0.1,
+                                target,
+                            ));
+
+                            self.agents[target_idx].memory.remember(Episode::social(
+                                epoch,
+                                &format!("{} told me about {}", agent_name, about_name),
+                                0.1,
+                                agent_id,
+                            ));
+
+                            // Gossiping increases familiarity
+                            self.agents[agent_idx].beliefs.update_sentiment(
+                                target,
+                                &target_name,
+                                0.05,
+                                epoch,
+                            );
+                            self.agents[target_idx].beliefs.update_sentiment(
+                                agent_id,
+                                &agent_name,
+                                0.05,
+                                epoch,
+                            );
+                        }
+                    }
+                }
             }
         }
 

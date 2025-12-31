@@ -122,6 +122,47 @@ impl Beliefs {
         belief.last_seen_epoch = epoch;
     }
 
+    /// Receive gossip about a third party
+    /// The influence is weighted by trust in the gossiper
+    /// Returns the sentiment description for logging
+    pub fn receive_gossip(
+        &mut self,
+        gossiper_id: Uuid,
+        about_id: Uuid,
+        about_name: &str,
+        gossiper_trust: f64,
+        gossiper_sentiment: f64,
+        epoch: usize,
+    ) -> String {
+        // How much we're influenced by the gossiper (max 30%)
+        let gossiper_trust_in_us = self.social.get(&gossiper_id).map(|b| b.trust).unwrap_or(0.0);
+        let influence = ((gossiper_trust_in_us + 1.0) / 2.0) * 0.3; // 0-30% based on trust
+
+        let belief = self.get_or_create_social(about_id, about_name);
+
+        // Blend our belief with the gossiper's belief
+        let old_trust = belief.trust;
+        let old_sentiment = belief.sentiment;
+
+        belief.trust = (belief.trust * (1.0 - influence) + gossiper_trust * influence).clamp(-1.0, 1.0);
+        belief.sentiment = (belief.sentiment * (1.0 - influence) + gossiper_sentiment * influence).clamp(-1.0, 1.0);
+        belief.last_seen_epoch = epoch;
+
+        // Return a description of the gossip sentiment
+        if gossiper_trust > 0.3 && gossiper_sentiment > 0.3 {
+            "positive".to_string()
+        } else if gossiper_trust < -0.3 || gossiper_sentiment < -0.3 {
+            "negative".to_string()
+        } else {
+            "neutral".to_string()
+        }
+    }
+
+    /// Get social belief about an agent (if exists)
+    pub fn get_social(&self, agent_id: Uuid) -> Option<&SocialBelief> {
+        self.social.get(&agent_id)
+    }
+
     /// Generate a summary for LLM prompting
     pub fn prompt_summary(&self, current_epoch: usize) -> String {
         let mut parts = Vec::new();
