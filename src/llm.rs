@@ -255,6 +255,52 @@ fn heuristic_action(agent: &Agent, nearby_agents: &[(uuid::Uuid, &str)]) -> Acti
         }
     }
 
+    // Priority 6: Court if extraverted/agreeable and conditions are right
+    if (agent.identity.personality.extraversion > 0.5 || agent.identity.personality.agreeableness > 0.5)
+        && !nearby_agents.is_empty()
+        && agent.reproduction.mating_cooldown == 0
+        && agent.reproduction.gestation.is_none()
+        && agent.physical.health > 0.5
+        && agent.physical.energy > 0.4
+        && rng.random::<f64>() < 0.2  // 20% chance
+    {
+        // Find someone we have positive feelings about or a stranger
+        let potential_partners: Vec<_> = nearby_agents.iter()
+            .filter(|(id, _)| {
+                agent.beliefs.social.get(id)
+                    .map(|b| b.sentiment >= 0.0)  // Not hostile
+                    .unwrap_or(true)  // Or unknown
+            })
+            .collect();
+
+        if !potential_partners.is_empty() {
+            let (target, _) = potential_partners[rng.random_range(0..potential_partners.len())];
+            return Action::Court { target: *target };
+        }
+    }
+
+    // Priority 7: Try to mate if courtship is high enough
+    if !nearby_agents.is_empty()
+        && agent.reproduction.mating_cooldown == 0
+        && agent.reproduction.gestation.is_none()
+        && agent.physical.health > 0.5
+        && agent.physical.energy > 0.4
+        && agent.physical.food >= 5  // Need food for mating
+    {
+        // Find someone with high courtship score
+        let mate_candidate = agent.reproduction.courtship_progress.iter()
+            .filter(|(id, score)| {
+                **score >= 0.7  // Threshold met
+                    && nearby_agents.iter().any(|(nid, _)| nid == *id)  // Is nearby
+            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| *id);
+
+        if let Some(target) = mate_candidate {
+            return Action::Mate { target };
+        }
+    }
+
     // Otherwise: random action
     match rng.random_range(0..10) {
         0..=4 => {

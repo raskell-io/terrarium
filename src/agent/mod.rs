@@ -8,6 +8,7 @@ pub use memory::{Episode, EpisodeCategory, Memory};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// A single agent in the simulation
@@ -19,6 +20,46 @@ pub struct Agent {
     pub memory: Memory,
     pub physical: PhysicalState,
     pub active_goal: Option<Goal>,
+    pub reproduction: ReproductionState,
+}
+
+/// Reproduction state for an agent
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReproductionState {
+    /// Courtship progress with other agents: partner_id -> score (0.0-1.0)
+    pub courtship_progress: HashMap<Uuid, f64>,
+    /// Current gestation (if pregnant/expecting)
+    pub gestation: Option<Gestation>,
+    /// Family relationships
+    pub family: FamilyRelations,
+    /// Cooldown epochs before can mate again
+    pub mating_cooldown: usize,
+}
+
+/// Active gestation state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Gestation {
+    /// Partner who contributed to conception
+    pub partner_id: Uuid,
+    /// Epoch when conception occurred
+    pub conception_epoch: usize,
+    /// Epoch when birth will occur
+    pub expected_birth_epoch: usize,
+    /// Pre-determined offspring identity (computed at conception)
+    pub offspring_identity: Identity,
+    /// Pre-determined offspring name
+    pub offspring_name: String,
+}
+
+/// Family relationship tracking
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FamilyRelations {
+    /// Parent UUIDs (0, 1, or 2 parents)
+    pub parents: Vec<Uuid>,
+    /// Children UUIDs
+    pub children: Vec<Uuid>,
+    /// Mate history
+    pub mate_history: Vec<Uuid>,
 }
 
 /// Physical state of an agent
@@ -65,6 +106,40 @@ impl Agent {
                 food: starting_food,
             },
             active_goal: Some(Goal::Explore),
+            reproduction: ReproductionState::default(),
+        }
+    }
+
+    /// Create a new agent with a pre-determined identity (for offspring)
+    pub fn new_with_identity(
+        identity: Identity,
+        x: usize,
+        y: usize,
+        starting_food: u32,
+        parents: Vec<Uuid>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            identity,
+            beliefs: Beliefs::new(),
+            memory: Memory::new(),
+            physical: PhysicalState {
+                x,
+                y,
+                health: 1.0,
+                hunger: 0.2, // Newborns start less hungry
+                energy: 0.8,
+                food: starting_food,
+            },
+            active_goal: Some(Goal::Explore),
+            reproduction: ReproductionState {
+                family: FamilyRelations {
+                    parents,
+                    children: Vec::new(),
+                    mate_history: Vec::new(),
+                },
+                ..Default::default()
+            },
         }
     }
 
@@ -171,10 +246,55 @@ impl Agent {
             None => "You have no particular goal right now.".to_string(),
         };
 
+        // Reproduction state
+        let mut reproduction_parts = Vec::new();
+
+        if let Some(gestation) = &self.reproduction.gestation {
+            let days_left = gestation.expected_birth_epoch.saturating_sub(epoch);
+            reproduction_parts.push(format!(
+                "You are expecting a child in {} days",
+                days_left
+            ));
+        }
+
+        if !self.reproduction.courtship_progress.is_empty() {
+            let courtships: Vec<String> = self
+                .reproduction
+                .courtship_progress
+                .iter()
+                .map(|(_, score)| format!("{:.0}%", score * 100.0))
+                .collect();
+            reproduction_parts.push(format!(
+                "You have {} active courtships",
+                courtships.len()
+            ));
+        }
+
+        if self.reproduction.mating_cooldown > 0 {
+            reproduction_parts.push(format!(
+                "You need {} days before you can mate again",
+                self.reproduction.mating_cooldown
+            ));
+        }
+
+        if self.reproduction.family.children.len() > 0 {
+            reproduction_parts.push(format!(
+                "You have {} children",
+                self.reproduction.family.children.len()
+            ));
+        }
+
+        let reproduction = if reproduction_parts.is_empty() {
+            String::new()
+        } else {
+            format!("\nReproduction: {}", reproduction_parts.join(". "))
+        };
+
         format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}{}\n\n{}\n\n{}\n\n{}",
             self.identity.prompt_description(),
             physical,
+            reproduction,
             goal,
             self.beliefs.prompt_summary(epoch),
             self.memory.prompt_summary(epoch),
@@ -238,4 +358,39 @@ pub fn generate_names(count: usize) -> Vec<String> {
     }
 
     names.into_iter().take(count).collect()
+}
+
+/// Generate a unique offspring name based on parents
+pub fn generate_offspring_name(parent_a_name: &str, parent_b_name: &str, existing_names: &[String]) -> String {
+    let mut rng = rand::rng();
+
+    // First try: unused names from the pool
+    let unused: Vec<_> = NAMES
+        .iter()
+        .filter(|n| !existing_names.iter().any(|e| e.eq_ignore_ascii_case(n)))
+        .collect();
+
+    if !unused.is_empty() {
+        return unused[rng.random_range(0..unused.len())].to_string();
+    }
+
+    // Fallback: blend parent names (first 2-3 chars of each)
+    let prefix_len_a = parent_a_name.len().min(2);
+    let prefix_len_b = parent_b_name.len().min(3);
+    let prefix_a = &parent_a_name[..prefix_len_a];
+    let suffix_b = &parent_b_name[parent_b_name.len().saturating_sub(prefix_len_b)..];
+
+    let mut blended = format!("{}{}", prefix_a, suffix_b.to_lowercase());
+
+    // Capitalize first letter
+    if let Some(first) = blended.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+
+    // Ensure uniqueness with suffix if needed
+    if existing_names.iter().any(|e| e.eq_ignore_ascii_case(&blended)) {
+        blended = format!("{}-{}", blended, rng.random_range(1..100));
+    }
+
+    blended
 }

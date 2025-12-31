@@ -163,6 +163,54 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         ]));
     }
 
+    // Reproduction state
+    let repr = &agent.reproduction;
+    if repr.is_gestating || repr.num_children > 0 || !repr.courtships.is_empty() || repr.on_cooldown {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Reproduction:",
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )));
+
+        // Gestation status
+        if repr.is_gestating {
+            if let Some(birth_epoch) = repr.expected_birth {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("♥♥", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" Expecting (day {})", birth_epoch), Style::default().fg(Color::Magenta)),
+                ]));
+            }
+        }
+
+        // Children
+        if repr.num_children > 0 {
+            lines.push(Line::from(vec![
+                Span::raw("  Children: "),
+                Span::styled(format!("{}", repr.num_children), Style::default().fg(Color::LightGreen)),
+            ]));
+        }
+
+        // Active courtships
+        for (name, score) in &repr.courtships {
+            let hearts = courtship_display(*score);
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(hearts, Style::default().fg(Color::LightMagenta)),
+                Span::raw(" "),
+                Span::styled(name, Style::default().fg(Color::Cyan)),
+            ]));
+        }
+
+        // Cooldown
+        if repr.on_cooldown {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("(cooldown)", Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
     lines.push(Line::from(""));
 
     // Relationships
@@ -229,4 +277,11 @@ fn trust_display(trust: f64) -> String {
     let filled = ((trust + 1.0) / 2.0 * 5.0).round() as usize;
     let empty = 5 - filled;
     format!("{}{}", "♥".repeat(filled), "♡".repeat(empty))
+}
+
+/// Convert courtship score to heart display (0.0 to 1.0)
+fn courtship_display(score: f64) -> String {
+    let filled = (score * 5.0).round() as usize;
+    let empty = 5 - filled.min(5);
+    format!("{}{}", "♥".repeat(filled.min(5)), "♡".repeat(empty))
 }

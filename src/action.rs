@@ -22,6 +22,10 @@ pub enum Action {
     Attack { target: Uuid },
     /// Share opinion about another agent (gossip)
     Gossip { target: Uuid, about: Uuid },
+    /// Court a nearby agent (advance courtship)
+    Court { target: Uuid },
+    /// Attempt to mate with a nearby agent (requires mutual consent and courtship threshold)
+    Mate { target: Uuid },
 }
 
 /// Movement directions (8-directional)
@@ -149,6 +153,24 @@ impl Action {
                     None
                 }
             }
+            "COURT" => {
+                if words.len() >= 2 {
+                    let target_name = words[1].to_lowercase();
+                    find_agent_by_name(&target_name, nearby_agents)
+                        .map(|target| Action::Court { target })
+                } else {
+                    None
+                }
+            }
+            "MATE" => {
+                if words.len() >= 2 {
+                    let target_name = words[1].to_lowercase();
+                    find_agent_by_name(&target_name, nearby_agents)
+                        .map(|target| Action::Mate { target })
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -178,6 +200,14 @@ impl Action {
                 let about_name = find_name_by_id(*about, agents).unwrap_or("someone");
                 format!("{} gossips to {} about {}", agent_name, target_name, about_name)
             }
+            Action::Court { target } => {
+                let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
+                format!("{} courts {}", agent_name, target_name)
+            }
+            Action::Mate { target } => {
+                let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
+                format!("{} attempts to mate with {}", agent_name, target_name)
+            }
         }
     }
 
@@ -198,6 +228,8 @@ impl Action {
             if nearby_agents.len() >= 2 {
                 actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>");
             }
+            actions.push("COURT <name> - court someone nearby (builds courtship over time)");
+            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent and sufficient courtship)");
         }
 
         actions.join("\n")

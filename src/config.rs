@@ -16,6 +16,8 @@ pub struct Config {
     pub llm: LlmConfig,
     #[serde(default)]
     pub environment: Option<EnvironmentConfig>,
+    #[serde(default)]
+    pub reproduction: ReproductionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,6 +43,74 @@ pub struct SimulationConfig {
     #[serde(default = "default_log_thoughts")]
     pub log_thoughts: bool,
 }
+
+/// Reproduction system configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReproductionConfig {
+    /// Whether reproduction is enabled
+    #[serde(default = "default_reproduction_enabled")]
+    pub enabled: bool,
+    /// Epochs required for gestation
+    #[serde(default = "default_gestation_period")]
+    pub gestation_period: usize,
+    /// Food cost to initiate mating (per parent)
+    #[serde(default = "default_mating_food_cost")]
+    pub mating_food_cost: u32,
+    /// Energy cost during gestation (per epoch)
+    #[serde(default = "default_gestation_energy_drain")]
+    pub gestation_energy_drain: f64,
+    /// Courtship threshold to allow mating (0.0-1.0)
+    #[serde(default = "default_courtship_threshold")]
+    pub courtship_threshold: f64,
+    /// Courtship score increase per successful court action
+    #[serde(default = "default_courtship_increment")]
+    pub courtship_increment: f64,
+    /// Courtship decay per epoch
+    #[serde(default = "default_courtship_decay")]
+    pub courtship_decay: f64,
+    /// Minimum epochs between mating for an agent
+    #[serde(default = "default_mating_cooldown")]
+    pub mating_cooldown: usize,
+    /// Starting food for newborn
+    #[serde(default = "default_offspring_starting_food")]
+    pub offspring_starting_food: u32,
+    /// Minimum health to reproduce
+    #[serde(default = "default_min_health_to_reproduce")]
+    pub min_health_to_reproduce: f64,
+    /// Minimum energy to reproduce
+    #[serde(default = "default_min_energy_to_reproduce")]
+    pub min_energy_to_reproduce: f64,
+}
+
+impl Default for ReproductionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            gestation_period: 10,
+            mating_food_cost: 5,
+            gestation_energy_drain: 0.02,
+            courtship_threshold: 0.7,
+            courtship_increment: 0.15,
+            courtship_decay: 0.05,
+            mating_cooldown: 20,
+            offspring_starting_food: 5,
+            min_health_to_reproduce: 0.5,
+            min_energy_to_reproduce: 0.4,
+        }
+    }
+}
+
+fn default_reproduction_enabled() -> bool { true }
+fn default_gestation_period() -> usize { 10 }
+fn default_mating_food_cost() -> u32 { 5 }
+fn default_gestation_energy_drain() -> f64 { 0.02 }
+fn default_courtship_threshold() -> f64 { 0.7 }
+fn default_courtship_increment() -> f64 { 0.15 }
+fn default_courtship_decay() -> f64 { 0.05 }
+fn default_mating_cooldown() -> usize { 20 }
+fn default_offspring_starting_food() -> u32 { 5 }
+fn default_min_health_to_reproduce() -> f64 { 0.5 }
+fn default_min_energy_to_reproduce() -> f64 { 0.4 }
 
 fn default_personality() -> String {
     "random".to_string()
@@ -89,6 +159,7 @@ impl Default for Config {
             },
             llm: LlmConfig::default(),
             environment: None,
+            reproduction: ReproductionConfig::default(),
         }
     }
 }

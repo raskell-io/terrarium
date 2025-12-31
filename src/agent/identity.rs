@@ -1,6 +1,7 @@
 use rand::prelude::IndexedRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Stable identity: personality, values, aspiration
 /// Does not change during simulation
@@ -29,7 +30,7 @@ pub struct Personality {
 }
 
 /// What the agent values most
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Value {
     Survival,
     Relationships,
@@ -145,6 +146,68 @@ impl Aspiration {
 }
 
 impl Identity {
+    /// Create a new identity by inheriting traits from two parents
+    pub fn from_parents(name: String, parent_a: &Identity, parent_b: &Identity) -> Self {
+        let mut rng = rand::rng();
+
+        // Each Big Five trait randomly picked from one parent
+        let personality = Personality {
+            openness: if rng.random::<bool>() {
+                parent_a.personality.openness
+            } else {
+                parent_b.personality.openness
+            },
+            conscientiousness: if rng.random::<bool>() {
+                parent_a.personality.conscientiousness
+            } else {
+                parent_b.personality.conscientiousness
+            },
+            extraversion: if rng.random::<bool>() {
+                parent_a.personality.extraversion
+            } else {
+                parent_b.personality.extraversion
+            },
+            agreeableness: if rng.random::<bool>() {
+                parent_a.personality.agreeableness
+            } else {
+                parent_b.personality.agreeableness
+            },
+            neuroticism: if rng.random::<bool>() {
+                parent_a.personality.neuroticism
+            } else {
+                parent_b.personality.neuroticism
+            },
+        };
+
+        // Values: 2-3 from union of parent values
+        let all_parent_values: HashSet<Value> = parent_a
+            .values
+            .iter()
+            .chain(parent_b.values.iter())
+            .copied()
+            .collect();
+        let all_values_vec: Vec<Value> = all_parent_values.into_iter().collect();
+        let count = rng.random_range(2..=3.min(all_values_vec.len()));
+        let values: Vec<Value> = all_values_vec
+            .choose_multiple(&mut rng, count)
+            .copied()
+            .collect();
+
+        // Aspiration: randomly from one parent
+        let aspiration = if rng.random::<bool>() {
+            parent_a.aspiration.clone()
+        } else {
+            parent_b.aspiration.clone()
+        };
+
+        Self {
+            name,
+            personality,
+            values,
+            aspiration,
+        }
+    }
+
     /// Create a new random identity with the given name
     pub fn new(name: String) -> Self {
         let mut rng = rand::rng();

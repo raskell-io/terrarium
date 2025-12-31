@@ -4,7 +4,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::action::{Action, Direction};
-use crate::agent::{generate_names, Agent, Episode, EpisodeCategory};
+use crate::agent::{generate_names, generate_offspring_name, Agent, Episode, EpisodeCategory, Identity};
 use crate::config::Config;
 use crate::environment::{EnvironmentConfig, EnvironmentState};
 use crate::groups::{GroupTracker, Group};
@@ -28,6 +28,8 @@ pub struct Engine {
     group_tracker: GroupTracker,
     /// Environment configuration (seasons, hazards, etc.)
     environment: EnvironmentConfig,
+    /// Pending births to be processed at end of epoch
+    pending_births: Vec<Agent>,
 }
 
 impl Engine {
@@ -72,6 +74,7 @@ impl Engine {
             max_event_epochs: 10,
             group_tracker: GroupTracker::new(),
             environment,
+            pending_births: Vec::new(),
         })
     }
 
@@ -320,12 +323,20 @@ impl Engine {
         }
 
         // 4. Resolve actions (simultaneous)
-        self.resolve_actions(epoch, actions)?;
+        self.resolve_actions(epoch, actions.clone())?;
 
-        // 5. Update beliefs based on what happened
+        // 5. Resolve mating (requires mutual consent check)
+        self.resolve_mating(epoch, &actions)?;
+
+        // 6. Tick reproduction systems
+        self.tick_gestations(epoch)?;
+        self.tick_courtship_decay();
+        self.process_births();
+
+        // 7. Update beliefs based on what happened
         self.update_beliefs(epoch);
 
-        // 6. Detect groups/alliances
+        // 8. Detect groups/alliances
         self.detect_groups(epoch)?;
 
         // Log epoch end
@@ -687,6 +698,88 @@ impl Engine {
                         }
                     }
                 }
+
+                Action::Court { target } => {
+                    if !self.config.reproduction.enabled {
+                        continue;
+                    }
+                    let target_idx = self.agents.iter().position(|a| a.id == target);
+                    if let Some(target_idx) = target_idx {
+                        let agent = &self.agents[agent_idx];
+                        let target_agent = &self.agents[target_idx];
+
+                        if is_adjacent(agent, target_agent) && target_agent.is_alive() {
+                            let agent_name = self.agents[agent_idx].name().to_string();
+                            let target_name = self.agents[target_idx].name().to_string();
+
+                            // Increase courtship score for both parties
+                            let increment = self.config.reproduction.courtship_increment;
+
+                            let new_score_a = self.agents[agent_idx]
+                                .reproduction
+                                .courtship_progress
+                                .entry(target)
+                                .or_insert(0.0);
+                            *new_score_a = (*new_score_a + increment).min(1.0);
+                            let score_from_agent = *new_score_a;
+
+                            let new_score_b = self.agents[target_idx]
+                                .reproduction
+                                .courtship_progress
+                                .entry(agent_id)
+                                .or_insert(0.0);
+                            *new_score_b = (*new_score_b + increment * 0.5).min(1.0); // Recipient gains less
+                            let score_from_target = *new_score_b;
+
+                            // Log courtship event
+                            self.log_and_track(Event::courted(
+                                epoch,
+                                agent_id,
+                                target,
+                                score_from_agent,
+                            ))?;
+
+                            // Create memories
+                            self.agents[agent_idx].memory.remember(Episode::social(
+                                epoch,
+                                &format!("I courted {}", target_name),
+                                0.2,
+                                target,
+                            ));
+
+                            self.agents[target_idx].memory.remember(Episode::social(
+                                epoch,
+                                &format!("{} courted me", agent_name),
+                                0.15,
+                                agent_id,
+                            ));
+
+                            // Boost sentiment
+                            self.agents[agent_idx].beliefs.update_sentiment(
+                                target,
+                                &target_name,
+                                0.1,
+                                epoch,
+                            );
+                            self.agents[target_idx].beliefs.update_sentiment(
+                                agent_id,
+                                &agent_name,
+                                0.08,
+                                epoch,
+                            );
+
+                            debug!(
+                                "{} courted {} (courtship: {:.2} / {:.2})",
+                                agent_name, target_name, score_from_agent, score_from_target
+                            );
+                        }
+                    }
+                }
+
+                Action::Mate { target: _ } => {
+                    // Mate actions are handled separately after all actions are collected
+                    // to check for mutual consent
+                }
             }
         }
 
@@ -892,6 +985,376 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    // ==================== Reproduction System ====================
+
+    /// Tick gestations: energy drain during pregnancy, check for births
+    fn tick_gestations(&mut self, epoch: usize) -> Result<()> {
+        if !self.config.reproduction.enabled {
+            return Ok(());
+        }
+
+        let energy_drain = self.config.reproduction.gestation_energy_drain;
+        let starting_food = self.config.reproduction.offspring_starting_food;
+
+        // Collect births to process
+        let mut births: Vec<(Uuid, Uuid, Uuid, Identity, String)> = Vec::new();
+
+        for agent in &mut self.agents {
+            if !agent.is_alive() {
+                continue;
+            }
+
+            if let Some(gestation) = &agent.reproduction.gestation {
+                // Energy drain during pregnancy
+                agent.physical.energy = (agent.physical.energy - energy_drain).max(0.0);
+
+                // Check if birth is due
+                if epoch >= gestation.expected_birth_epoch {
+                    births.push((
+                        agent.id,
+                        agent.id,
+                        gestation.partner_id,
+                        gestation.offspring_identity.clone(),
+                        gestation.offspring_name.clone(),
+                    ));
+                }
+            }
+        }
+
+        // Process births
+        for (_agent_id, carrier_id, partner_id, offspring_identity, _offspring_name) in births {
+            let carrier_idx = match self.agents.iter().position(|a| a.id == carrier_id) {
+                Some(idx) => idx,
+                None => continue,
+            };
+            let carrier = &self.agents[carrier_idx];
+            let spawn_pos = self.find_adjacent_spawn(carrier.physical.x, carrier.physical.y);
+
+            // Create the child
+            let child = Agent::new_with_identity(
+                offspring_identity,
+                spawn_pos.0,
+                spawn_pos.1,
+                starting_food,
+                vec![carrier_id, partner_id],
+            );
+            let child_id = child.id;
+            let child_name = child.name().to_string();
+
+            // Log birth event
+            self.log_and_track(Event::birth_occurred(
+                epoch,
+                carrier_id,
+                partner_id,
+                child_id,
+                &child_name,
+            ))?;
+
+            info!("{} was born to the family!", child_name);
+
+            // Queue the child to be added
+            self.pending_births.push(child);
+
+            // Clear gestation and update family records for carrier
+            self.agents[carrier_idx].reproduction.gestation = None;
+            self.agents[carrier_idx].reproduction.family.children.push(child_id);
+
+            // Update family records for partner (if alive)
+            if let Some(partner_idx) = self.agents.iter().position(|a| a.id == partner_id) {
+                self.agents[partner_idx].reproduction.family.children.push(child_id);
+            }
+
+            // Create memories for parents
+            self.agents[carrier_idx].memory.remember(Episode::social(
+                epoch,
+                &format!("I gave birth to {}", child_name),
+                0.8,
+                child_id,
+            ));
+
+            if let Some(partner_idx) = self.agents.iter().position(|a| a.id == partner_id) {
+                let carrier_name = self.agents[carrier_idx].name().to_string();
+                self.agents[partner_idx].memory.remember(Episode::social(
+                    epoch,
+                    &format!("{} and I had a child named {}", carrier_name, child_name),
+                    0.7,
+                    child_id,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Decay courtship scores each epoch
+    fn tick_courtship_decay(&mut self) {
+        if !self.config.reproduction.enabled {
+            return;
+        }
+
+        let decay = self.config.reproduction.courtship_decay;
+
+        for agent in &mut self.agents {
+            if !agent.is_alive() {
+                continue;
+            }
+
+            // Decay courtship scores
+            agent.reproduction.courtship_progress.retain(|_, score| {
+                *score -= decay;
+                *score > 0.0
+            });
+
+            // Decrement mating cooldown
+            if agent.reproduction.mating_cooldown > 0 {
+                agent.reproduction.mating_cooldown -= 1;
+            }
+        }
+    }
+
+    /// Resolve mating actions - requires mutual consent
+    fn resolve_mating(&mut self, epoch: usize, actions: &HashMap<Uuid, Action>) -> Result<()> {
+        if !self.config.reproduction.enabled {
+            return Ok(());
+        }
+
+        // Find all Mate actions
+        let mate_actions: Vec<(Uuid, Uuid)> = actions
+            .iter()
+            .filter_map(|(agent_id, action)| {
+                if let Action::Mate { target } = action {
+                    Some((*agent_id, *target))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Check for mutual consent pairs
+        let mut processed: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+
+        for (agent_a, target_a) in &mate_actions {
+            if processed.contains(agent_a) {
+                continue;
+            }
+
+            // Check if target is also trying to mate with agent_a
+            let mutual = mate_actions
+                .iter()
+                .any(|(agent_b, target_b)| agent_b == target_a && target_b == agent_a);
+
+            if mutual {
+                self.attempt_mating(epoch, *agent_a, *target_a)?;
+                processed.insert(*agent_a);
+                processed.insert(*target_a);
+            } else {
+                // One-sided - rejection
+                if let Some(agent_idx) = self.agents.iter().position(|a| a.id == *agent_a) {
+                    let target_name = self.agents
+                        .iter()
+                        .find(|a| a.id == *target_a)
+                        .map(|a| a.name().to_string())
+                        .unwrap_or_else(|| "someone".to_string());
+
+                    self.agents[agent_idx].memory.remember(Episode::social(
+                        epoch,
+                        &format!("{} wasn't interested in mating", target_name),
+                        -0.1,
+                        *target_a,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Attempt mating between two agents
+    fn attempt_mating(&mut self, epoch: usize, agent_a: Uuid, agent_b: Uuid) -> Result<()> {
+        let idx_a = self.agents.iter().position(|a| a.id == agent_a);
+        let idx_b = self.agents.iter().position(|a| a.id == agent_b);
+
+        let (idx_a, idx_b) = match (idx_a, idx_b) {
+            (Some(a), Some(b)) => (a, b),
+            _ => return Ok(()),
+        };
+
+        // Validate mating conditions
+        let config = &self.config.reproduction;
+
+        // Check adjacency
+        if !is_adjacent(&self.agents[idx_a], &self.agents[idx_b]) {
+            return Ok(());
+        }
+
+        // Check if both are alive
+        if !self.agents[idx_a].is_alive() || !self.agents[idx_b].is_alive() {
+            return Ok(());
+        }
+
+        // Check health requirements
+        if self.agents[idx_a].physical.health < config.min_health_to_reproduce
+            || self.agents[idx_b].physical.health < config.min_health_to_reproduce
+        {
+            return Ok(());
+        }
+
+        // Check energy requirements
+        if self.agents[idx_a].physical.energy < config.min_energy_to_reproduce
+            || self.agents[idx_b].physical.energy < config.min_energy_to_reproduce
+        {
+            return Ok(());
+        }
+
+        // Check food requirements
+        if self.agents[idx_a].physical.food < config.mating_food_cost
+            || self.agents[idx_b].physical.food < config.mating_food_cost
+        {
+            return Ok(());
+        }
+
+        // Check mating cooldowns
+        if self.agents[idx_a].reproduction.mating_cooldown > 0
+            || self.agents[idx_b].reproduction.mating_cooldown > 0
+        {
+            return Ok(());
+        }
+
+        // Check if either is already gestating
+        if self.agents[idx_a].reproduction.gestation.is_some()
+            || self.agents[idx_b].reproduction.gestation.is_some()
+        {
+            return Ok(());
+        }
+
+        // Check courtship threshold (average of both scores)
+        let score_a = self.agents[idx_a]
+            .reproduction
+            .courtship_progress
+            .get(&agent_b)
+            .copied()
+            .unwrap_or(0.0);
+        let score_b = self.agents[idx_b]
+            .reproduction
+            .courtship_progress
+            .get(&agent_a)
+            .copied()
+            .unwrap_or(0.0);
+        let avg_score = (score_a + score_b) / 2.0;
+
+        if avg_score < config.courtship_threshold {
+            return Ok(());
+        }
+
+        // All checks passed - proceed with mating!
+        let name_a = self.agents[idx_a].name().to_string();
+        let name_b = self.agents[idx_b].name().to_string();
+
+        info!("{} and {} are mating!", name_a, name_b);
+
+        // Deduct food cost
+        self.agents[idx_a].remove_food(config.mating_food_cost);
+        self.agents[idx_b].remove_food(config.mating_food_cost);
+
+        // Set mating cooldowns
+        self.agents[idx_a].reproduction.mating_cooldown = config.mating_cooldown;
+        self.agents[idx_b].reproduction.mating_cooldown = config.mating_cooldown;
+
+        // Update mate history
+        self.agents[idx_a].reproduction.family.mate_history.push(agent_b);
+        self.agents[idx_b].reproduction.family.mate_history.push(agent_a);
+
+        // Randomly select carrier (who gestates)
+        let carrier_idx = if rand::random::<bool>() { idx_a } else { idx_b };
+        let partner_idx = if carrier_idx == idx_a { idx_b } else { idx_a };
+        let carrier_id = self.agents[carrier_idx].id;
+        let partner_id = self.agents[partner_idx].id;
+
+        // Generate offspring identity
+        let existing_names: Vec<String> = self.agents.iter().map(|a| a.name().to_string()).collect();
+        let offspring_name = generate_offspring_name(
+            &self.agents[idx_a].name(),
+            &self.agents[idx_b].name(),
+            &existing_names,
+        );
+        let offspring_identity = Identity::from_parents(
+            offspring_name.clone(),
+            &self.agents[idx_a].identity,
+            &self.agents[idx_b].identity,
+        );
+
+        // Create gestation
+        let gestation = crate::agent::Gestation {
+            partner_id,
+            conception_epoch: epoch,
+            expected_birth_epoch: epoch + config.gestation_period,
+            offspring_identity,
+            offspring_name,
+        };
+
+        self.agents[carrier_idx].reproduction.gestation = Some(gestation);
+
+        // Log conception event
+        self.log_and_track(Event::conceived(epoch, carrier_id, partner_id))?;
+
+        // Create memories
+        let carrier_name = self.agents[carrier_idx].name().to_string();
+        let partner_name = self.agents[partner_idx].name().to_string();
+
+        self.agents[carrier_idx].memory.remember(Episode::social(
+            epoch,
+            &format!("{} and I conceived a child", partner_name),
+            0.6,
+            partner_id,
+        ));
+
+        self.agents[partner_idx].memory.remember(Episode::social(
+            epoch,
+            &format!("{} and I conceived a child", carrier_name),
+            0.6,
+            carrier_id,
+        ));
+
+        // Boost relationship
+        self.agents[carrier_idx].beliefs.update_sentiment(partner_id, &partner_name, 0.2, epoch);
+        self.agents[partner_idx].beliefs.update_sentiment(carrier_id, &carrier_name, 0.2, epoch);
+        self.agents[carrier_idx].beliefs.update_trust(partner_id, &partner_name, 0.15, epoch);
+        self.agents[partner_idx].beliefs.update_trust(carrier_id, &carrier_name, 0.15, epoch);
+
+        Ok(())
+    }
+
+    /// Add pending births to the simulation
+    fn process_births(&mut self) {
+        let births = std::mem::take(&mut self.pending_births);
+        // Register and add each new birth
+        for child in births {
+            // Register the child's name in the chronicle
+            self.chronicle.register_agents(std::slice::from_ref(&child));
+            self.agents.push(child);
+        }
+    }
+
+    /// Find an adjacent spawn position for a newborn
+    fn find_adjacent_spawn(&self, x: usize, y: usize) -> (usize, usize) {
+        // Try adjacent cells first
+        let deltas = [
+            (0, 1), (1, 0), (0, -1), (-1, 0),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ];
+
+        for (dx, dy) in deltas {
+            let nx = (x as i32 + dx).max(0) as usize;
+            let ny = (y as i32 + dy).max(0) as usize;
+            if nx < self.world.width && ny < self.world.height {
+                return (nx, ny);
+            }
+        }
+
+        // Fallback to same position
+        (x, y)
     }
 }
 

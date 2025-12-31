@@ -41,6 +41,11 @@ pub enum EventType {
     RivalryChanged,
     RivalryEnded,
 
+    // Reproduction
+    Courted,
+    Conceived,
+    BirthOccurred,
+
     // Meta
     EpochStart,
     EpochEnd,
@@ -84,6 +89,21 @@ pub struct EventData {
     /// Previous rivalry type for rivalry change events
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_rivalry_type: Option<String>,
+    /// Courtship score for courted events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub courtship_score: Option<f64>,
+    /// Parent A for birth events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_a: Option<Uuid>,
+    /// Parent B for birth events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_b: Option<Uuid>,
+    /// Child for birth events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child: Option<Uuid>,
+    /// Child name for birth events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_name: Option<String>,
 }
 
 impl Event {
@@ -341,6 +361,55 @@ impl Event {
             },
         }
     }
+
+    pub fn courted(epoch: usize, agent: Uuid, target: Uuid, courtship_score: f64) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Courted,
+            agent: Some(agent),
+            target: Some(target),
+            data: EventData {
+                courtship_score: Some(courtship_score),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn conceived(epoch: usize, parent_a: Uuid, parent_b: Uuid) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Conceived,
+            agent: Some(parent_a),
+            target: Some(parent_b),
+            data: EventData {
+                parent_a: Some(parent_a),
+                parent_b: Some(parent_b),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn birth_occurred(
+        epoch: usize,
+        parent_a: Uuid,
+        parent_b: Uuid,
+        child: Uuid,
+        child_name: &str,
+    ) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::BirthOccurred,
+            agent: None,
+            target: None,
+            data: EventData {
+                parent_a: Some(parent_a),
+                parent_b: Some(parent_b),
+                child: Some(child),
+                child_name: Some(child_name.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
 }
 
 impl EventData {
@@ -360,6 +429,11 @@ impl EventData {
             group_b_name: None,
             rivalry_type: None,
             old_rivalry_type: None,
+            courtship_score: None,
+            parent_a: None,
+            parent_b: None,
+            child: None,
+            child_name: None,
         }
     }
 }

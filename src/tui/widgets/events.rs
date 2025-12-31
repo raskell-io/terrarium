@@ -64,6 +64,9 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::RivalryFormed => ("⚔", Style::default().fg(Color::Red)),
             EventViewType::RivalryChanged => ("↔", Style::default().fg(Color::LightRed)),
             EventViewType::RivalryEnded => ("☮", Style::default().fg(Color::Green)),
+            EventViewType::Courtship => ("♥", Style::default().fg(Color::LightMagenta)),
+            EventViewType::Conception => ("♥", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            EventViewType::Birth => ("★", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
             EventViewType::Meta => ("", Style::default().fg(Color::DarkGray)),
         };
 

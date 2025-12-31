@@ -51,6 +51,9 @@ pub struct AgentView {
     pub current_goal: Option<String>,
     pub recent_memories: Vec<String>,
     pub social_beliefs: Vec<SocialBeliefView>,
+
+    // Reproduction
+    pub reproduction: ReproductionView,
 }
 
 /// View of a social belief
@@ -59,6 +62,17 @@ pub struct SocialBeliefView {
     pub about: String,
     pub trust: f64,
     pub sentiment: f64,
+}
+
+/// View of reproduction state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReproductionView {
+    pub is_gestating: bool,
+    pub expected_birth: Option<usize>,
+    pub num_children: usize,
+    pub parent_names: Vec<String>,
+    pub courtships: Vec<(String, f64)>,
+    pub on_cooldown: bool,
 }
 
 /// View of an event for display
@@ -88,6 +102,9 @@ pub enum EventViewType {
     RivalryFormed,
     RivalryChanged,
     RivalryEnded,
+    Courtship,
+    Conception,
+    Birth,
     Meta,
 }
 
@@ -196,6 +213,41 @@ impl AgentView {
             .map(|e| format!("Day {}: {}", e.epoch, e.description))
             .collect();
 
+        // Build reproduction view
+        let parent_names: Vec<String> = agent
+            .reproduction
+            .family
+            .parents
+            .iter()
+            .filter_map(|id| agents.iter().find(|a| a.id == *id))
+            .map(|a| a.name().to_string())
+            .collect();
+
+        let courtships: Vec<(String, f64)> = agent
+            .reproduction
+            .courtship_progress
+            .iter()
+            .filter_map(|(id, score)| {
+                agents
+                    .iter()
+                    .find(|a| a.id == *id)
+                    .map(|a| (a.name().to_string(), *score))
+            })
+            .collect();
+
+        let reproduction = ReproductionView {
+            is_gestating: agent.reproduction.gestation.is_some(),
+            expected_birth: agent
+                .reproduction
+                .gestation
+                .as_ref()
+                .map(|g| g.expected_birth_epoch),
+            num_children: agent.reproduction.family.children.len(),
+            parent_names,
+            courtships,
+            on_cooldown: agent.reproduction.mating_cooldown > 0,
+        };
+
         Self {
             id: agent.id,
             name: agent.name().to_string(),
@@ -210,6 +262,7 @@ impl AgentView {
             current_goal: agent.active_goal.as_ref().map(|g| g.describe().to_string()),
             recent_memories,
             social_beliefs,
+            reproduction,
         }
     }
 }
@@ -370,6 +423,32 @@ impl EventView {
                 (
                     format!("{} and {} no longer rivals", group_a, group_b),
                     EventViewType::RivalryEnded,
+                )
+            }
+            EventType::Courted => {
+                let name = agent_name(event.agent?);
+                let target_name = agent_name(event.target?);
+                let score = event.data.courtship_score.unwrap_or(0.0);
+                (
+                    format!("{} courted {} ({:.0}%)", name, target_name, score * 100.0),
+                    EventViewType::Courtship,
+                )
+            }
+            EventType::Conceived => {
+                let parent_a = event.data.parent_a.map(agent_name).unwrap_or_else(|| "Unknown".to_string());
+                let parent_b = event.data.parent_b.map(agent_name).unwrap_or_else(|| "Unknown".to_string());
+                (
+                    format!("{} and {} conceived", parent_a, parent_b),
+                    EventViewType::Conception,
+                )
+            }
+            EventType::BirthOccurred => {
+                let parent_a = event.data.parent_a.map(agent_name).unwrap_or_else(|| "Unknown".to_string());
+                let parent_b = event.data.parent_b.map(agent_name).unwrap_or_else(|| "Unknown".to_string());
+                let child_name = event.data.child_name.as_deref().unwrap_or("Unknown");
+                (
+                    format!("{} was born to {} and {}", child_name, parent_a, parent_b),
+                    EventViewType::Birth,
                 )
             }
         };
