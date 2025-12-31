@@ -8,6 +8,7 @@ use crate::agent::{generate_names, Agent, Episode, EpisodeCategory};
 use crate::config::Config;
 use crate::llm::LlmClient;
 use crate::observation::{Chronicle, Event};
+use crate::observer::{AgentView, EventView, WorldView};
 use crate::world::World;
 
 /// The simulation engine
@@ -17,6 +18,10 @@ pub struct Engine {
     agents: Vec<Agent>,
     llm: LlmClient,
     chronicle: Chronicle,
+    /// Recent events for observer clients (last N epochs)
+    recent_events: Vec<Event>,
+    /// Maximum epochs of events to keep
+    max_event_epochs: usize,
 }
 
 impl Engine {
@@ -49,7 +54,111 @@ impl Engine {
             agents,
             llm,
             chronicle,
+            recent_events: Vec::new(),
+            max_event_epochs: 10,
         })
+    }
+
+    // ==================== Observer Interface ====================
+
+    /// Get a view of the current world state
+    pub fn world_view(&self) -> WorldView {
+        WorldView::from_world(&self.world, &self.agents)
+    }
+
+    /// Get views of all agents
+    pub fn agent_views(&self) -> Vec<AgentView> {
+        self.agents
+            .iter()
+            .map(|a| AgentView::from_agent(a, &self.agents))
+            .collect()
+    }
+
+    /// Get view of a specific agent by ID
+    pub fn agent_view(&self, id: Uuid) -> Option<AgentView> {
+        self.agents
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| AgentView::from_agent(a, &self.agents))
+    }
+
+    /// Get recent events as views
+    pub fn recent_event_views(&self) -> Vec<EventView> {
+        EventView::from_events(&self.recent_events, &self.agents)
+    }
+
+    /// Get the current epoch
+    pub fn epoch(&self) -> usize {
+        self.world.epoch
+    }
+
+    /// Get the total configured epochs
+    pub fn total_epochs(&self) -> usize {
+        self.config.simulation.epochs
+    }
+
+    /// Check if simulation is complete
+    pub fn is_complete(&self) -> bool {
+        self.world.epoch >= self.config.simulation.epochs
+            || self.agents.iter().all(|a| !a.is_alive())
+    }
+
+    /// Get count of living agents
+    pub fn alive_count(&self) -> usize {
+        self.agents.iter().filter(|a| a.is_alive()).count()
+    }
+
+    /// Step the simulation by one epoch (for TUI control)
+    pub async fn step(&mut self) -> Result<()> {
+        if self.is_complete() {
+            return Ok(());
+        }
+
+        let epoch = self.world.epoch;
+
+        // Run one epoch
+        self.run_epoch(epoch).await?;
+
+        // Periodic snapshot
+        if epoch % self.config.simulation.snapshot_interval == 0 && epoch > 0 {
+            self.chronicle.save_snapshot(epoch, &self.world, &self.agents)?;
+        }
+
+        // Prune old events
+        self.prune_old_events();
+
+        Ok(())
+    }
+
+    /// Initialize the simulation (write header, etc.)
+    pub fn initialize(&mut self) -> Result<()> {
+        self.chronicle.write_header(
+            &self.config.meta.name,
+            &self.world,
+            &self.agents,
+        )?;
+        self.chronicle.save_snapshot(0, &self.world, &self.agents)?;
+        Ok(())
+    }
+
+    /// Finalize the simulation (write footer, final snapshot)
+    pub fn finalize(&mut self) -> Result<()> {
+        self.chronicle.save_snapshot(self.world.epoch, &self.world, &self.agents)?;
+        self.chronicle.write_footer(&self.world, &self.agents)?;
+        Ok(())
+    }
+
+    /// Log and track an event
+    fn log_and_track(&mut self, event: Event) -> Result<()> {
+        self.recent_events.push(event.clone());
+        self.chronicle.log_event(&event)?;
+        Ok(())
+    }
+
+    /// Prune events older than max_event_epochs
+    fn prune_old_events(&mut self) {
+        let cutoff = self.world.epoch.saturating_sub(self.max_event_epochs);
+        self.recent_events.retain(|e| e.epoch >= cutoff);
     }
 
     /// Run the simulation
@@ -99,12 +208,13 @@ impl Engine {
         debug!("Epoch {} starting", epoch);
 
         // Log epoch start
-        self.chronicle.log_event(&Event::epoch_start(epoch))?;
+        self.log_and_track(Event::epoch_start(epoch))?;
 
         // 1. World tick (regenerate resources)
         self.world.tick(self.config.world.food_regen_rate);
 
         // 2. Update agent needs
+        let mut death_events = Vec::new();
         for agent in &mut self.agents {
             if agent.is_alive() {
                 agent.tick_hunger();
@@ -113,9 +223,12 @@ impl Engine {
 
                 // Check for starvation death
                 if !agent.is_alive() {
-                    self.chronicle.log_event(&Event::died(epoch, agent.id, "starvation"))?;
+                    death_events.push(Event::died(epoch, agent.id, "starvation"));
                 }
             }
+        }
+        for event in death_events {
+            self.log_and_track(event)?;
         }
 
         // 3. Perception and deliberation (collect actions)
@@ -154,7 +267,7 @@ impl Engine {
         self.update_beliefs(epoch);
 
         // Log epoch end
-        self.chronicle.log_event(&Event::epoch_end(epoch))?;
+        self.log_and_track(Event::epoch_end(epoch))?;
         self.chronicle.flush()?;
 
         // Progress update
@@ -207,7 +320,7 @@ impl Engine {
                         agent.physical.y = new_y;
                         agent.physical.energy = (agent.physical.energy - 0.05).max(0.0);
 
-                        self.chronicle.log_event(&Event::moved(
+                        self.log_and_track(Event::moved(
                             epoch,
                             agent_id,
                             from,
@@ -227,29 +340,34 @@ impl Engine {
                     let max_take = 5 / num_gatherers as u32;
                     let max_take = max_take.max(1);
 
-                    if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
+                    // Take food from cell
+                    let (taken, remaining_food) = if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
                         let taken = cell.take_food(max_take);
-                        if taken > 0 {
-                            self.agents[agent_idx].add_food(taken);
-                            self.agents[agent_idx].physical.energy =
-                                (self.agents[agent_idx].physical.energy - 0.1).max(0.0);
+                        (taken, cell.food)
+                    } else {
+                        (0, 0)
+                    };
 
-                            self.chronicle.log_event(&Event::gathered(epoch, agent_id, taken))?;
+                    if taken > 0 {
+                        self.agents[agent_idx].add_food(taken);
+                        self.agents[agent_idx].physical.energy =
+                            (self.agents[agent_idx].physical.energy - 0.1).max(0.0);
 
-                            // Update belief about this location
-                            self.agents[agent_idx]
-                                .beliefs
-                                .update_food_belief(pos.0, pos.1, cell.food, epoch);
-                        }
+                        self.log_and_track(Event::gathered(epoch, agent_id, taken))?;
+
+                        // Update belief about this location
+                        self.agents[agent_idx]
+                            .beliefs
+                            .update_food_belief(pos.0, pos.1, remaining_food, epoch);
                     }
                 }
 
                 Action::Eat => {
-                    let agent = &mut self.agents[agent_idx];
-                    if agent.eat() {
-                        self.chronicle.log_event(&Event::ate(epoch, agent_id))?;
+                    let ate = self.agents[agent_idx].eat();
+                    if ate {
+                        self.log_and_track(Event::ate(epoch, agent_id))?;
 
-                        agent.memory.remember(Episode::survival(
+                        self.agents[agent_idx].memory.remember(Episode::survival(
                             epoch,
                             "I ate and felt better",
                             0.3,
@@ -258,9 +376,8 @@ impl Engine {
                 }
 
                 Action::Rest => {
-                    let agent = &mut self.agents[agent_idx];
-                    agent.rest();
-                    self.chronicle.log_event(&Event::rested(epoch, agent_id))?;
+                    self.agents[agent_idx].rest();
+                    self.log_and_track(Event::rested(epoch, agent_id))?;
                 }
 
                 Action::Speak { target, message } => {
@@ -271,7 +388,7 @@ impl Engine {
                         let target_agent = &self.agents[target_idx];
 
                         if is_adjacent(agent, target_agent) {
-                            self.chronicle.log_event(&Event::spoke(
+                            self.log_and_track(Event::spoke(
                                 epoch,
                                 agent_id,
                                 target,
@@ -324,7 +441,7 @@ impl Engine {
                             if actual > 0 {
                                 self.agents[target_idx].add_food(actual);
 
-                                self.chronicle.log_event(&Event::gave(
+                                self.log_and_track(Event::gave(
                                     epoch,
                                     agent_id,
                                     target,
@@ -381,7 +498,7 @@ impl Engine {
 
                             self.agents[target_idx].take_damage(damage);
 
-                            self.chronicle.log_event(&Event::attacked(
+                            self.log_and_track(Event::attacked(
                                 epoch,
                                 agent_id,
                                 target,
@@ -393,7 +510,7 @@ impl Engine {
 
                             // Check if target died
                             if !self.agents[target_idx].is_alive() {
-                                self.chronicle.log_event(&Event::died(
+                                self.log_and_track(Event::died(
                                     epoch,
                                     target,
                                     &format!("attack by {}", agent_name),

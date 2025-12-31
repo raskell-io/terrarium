@@ -9,6 +9,8 @@ mod config;
 mod engine;
 mod llm;
 mod observation;
+mod observer;
+mod tui;
 mod world;
 
 use config::Config;
@@ -34,6 +36,10 @@ struct Args {
     /// Verbosity level (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    /// Run with TUI viewer
+    #[arg(long)]
+    tui: bool,
 }
 
 #[tokio::main]
@@ -74,9 +80,14 @@ async fn main() -> Result<()> {
         config.meta.name, config.agents.count, config.simulation.epochs
     );
 
-    // Create and run the engine
-    let mut engine = Engine::new(config, &args.output)?;
-    engine.run().await?;
+    if args.tui {
+        // Run with TUI viewer
+        tui::run(config, &args.output).await?;
+    } else {
+        // Run headless (batch mode)
+        let mut engine = Engine::new(config, &args.output)?;
+        engine.run().await?;
+    }
 
     info!("Output written to {}/", args.output);
     info!("  - events.jsonl: Full event log");
