@@ -48,9 +48,13 @@ pub fn draw(frame: &mut Frame, engine: &Engine, app: &mut App) {
     // Draw world
     draw_world(frame, top_chunks[0], engine, app);
 
-    // Draw events (if enabled)
+    // Draw events or trades panel (if enabled)
     if app.show_events && top_chunks.len() > 1 {
-        draw_events(frame, top_chunks[1], engine, app);
+        if app.show_trades {
+            draw_trades(frame, top_chunks[1], engine);
+        } else {
+            draw_events(frame, top_chunks[1], engine, app);
+        }
     }
 
     // Draw agent panel (if enabled)
@@ -79,6 +83,12 @@ fn draw_world(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 fn draw_events(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
     let events = engine.recent_event_views();
     widgets::events::draw(frame, area, &events, engine.epoch(), app.events_scroll);
+}
+
+/// Draw the trades panel
+fn draw_trades(frame: &mut Frame, area: Rect, engine: &Engine) {
+    let trade_view = engine.trade_views();
+    widgets::trades::draw(frame, area, &trade_view);
 }
 
 /// Draw the agent panel
@@ -218,6 +228,7 @@ fn draw_help(frame: &mut Frame) {
             Style::default().add_modifier(Modifier::UNDERLINED),
         )),
         Line::from("  E           Toggle events panel"),
+        Line::from("  T           Toggle trades panel"),
         Line::from("  A           Toggle agent panel"),
         Line::from("  F           Toggle full agent details"),
         Line::from("  PageUp/Down Scroll events"),

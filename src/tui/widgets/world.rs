@@ -41,12 +41,35 @@ pub fn draw(
                 .iter()
                 .find(|a| a.alive && a.position == (x, y));
 
+            // Determine territory background color based on selected agent
+            let territory_bg = if let Some(cell) = cell {
+                if let Some(ref territory) = cell.territory {
+                    if let Some(selected_id) = selected {
+                        if territory.owner_id == selected_id {
+                            // Own territory - green tint
+                            Some(Color::Rgb(30, 50, 30))
+                        } else {
+                            // Check if selected agent is a guest (we'd need guest list, but TerritoryView has guest_count)
+                            // For now, show foreign territory as red tint
+                            Some(Color::Rgb(50, 30, 30))
+                        }
+                    } else {
+                        // No agent selected, show neutral territory marker
+                        Some(Color::Rgb(40, 40, 50))
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let (ch, style) = if let Some(agent) = agent_here {
                 // Agent present
                 let first_char = agent.name.chars().next().unwrap_or('?');
                 let is_selected = selected == Some(agent.id);
 
-                let style = if is_selected {
+                let mut style = if is_selected {
                     Style::default()
                         .fg(Color::Black)
                         .bg(Color::Yellow)
@@ -55,20 +78,56 @@ pub fn draw(
                     Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
                 };
 
+                // Apply territory background if not selected (selected has priority)
+                if !is_selected {
+                    if let Some(bg) = territory_bg {
+                        style = style.bg(bg);
+                    }
+                }
+
                 (first_char, style)
             } else if let Some(cell) = cell {
-                // No agent, show terrain
-                match cell.terrain {
-                    Terrain::Fertile => {
-                        if cell.food > 10 {
-                            ('*', Style::default().fg(Color::Green))
-                        } else if cell.food > 0 {
-                            ('*', Style::default().fg(Color::DarkGray))
-                        } else {
-                            ('.', Style::default().fg(Color::DarkGray))
+                // No agent - check for structure first
+                if let Some(ref structure) = cell.structure {
+                    // Show structure icon
+                    let (ch, color) = if structure.is_complete {
+                        // Complete structures
+                        match structure.structure_type.as_str() {
+                            "LeanTo" => ('△', Color::Yellow),
+                            "Shelter" => ('▲', Color::Yellow),
+                            "Storage" => ('□', Color::Cyan),
+                            "Workbench" => ('⚒', Color::LightBlue),
+                            "Farm" => ('♠', Color::Green),
+                            _ => ('■', Color::White),
                         }
+                    } else {
+                        // Under construction
+                        ('░', Color::DarkGray)
+                    };
+                    let mut style = Style::default().fg(color);
+                    if let Some(bg) = territory_bg {
+                        style = style.bg(bg);
                     }
-                    Terrain::Barren => ('.', Style::default().fg(Color::Rgb(50, 50, 50))),
+                    (ch, style)
+                } else {
+                    // No structure, show terrain
+                    let (ch, mut style) = match cell.terrain {
+                        Terrain::Fertile => {
+                            if cell.food > 10 {
+                                ('*', Style::default().fg(Color::Green))
+                            } else if cell.food > 0 {
+                                ('*', Style::default().fg(Color::DarkGray))
+                            } else {
+                                ('.', Style::default().fg(Color::DarkGray))
+                            }
+                        }
+                        Terrain::Barren => ('.', Style::default().fg(Color::Rgb(50, 50, 50))),
+                    };
+                    // Apply territory background
+                    if let Some(bg) = territory_bg {
+                        style = style.bg(bg);
+                    }
+                    (ch, style)
                 }
             } else {
                 (' ', Style::default())

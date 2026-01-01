@@ -55,6 +55,7 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::Speech => ("", Style::default().fg(Color::Yellow)),
             EventViewType::Gift => ("→", Style::default().fg(Color::Magenta)),
             EventViewType::Attack => ("!", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            EventViewType::AllyIntervened => ("⛨", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             EventViewType::Death => ("†", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             EventViewType::Gossip => ("◊", Style::default().fg(Color::LightMagenta)),
             EventViewType::GroupFormed => ("★", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -68,6 +69,31 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::Conception => ("♥", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
             EventViewType::Birth => ("★", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD)),
             EventViewType::SkillTaught => ("✦", Style::default().fg(Color::Cyan)),
+            // Crafting events
+            EventViewType::MaterialGathering => ("◇", Style::default().fg(Color::Yellow)),
+            EventViewType::Crafting => ("⚒", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)),
+            EventViewType::Hunting => ("→", Style::default().fg(Color::Red)),
+            EventViewType::Fishing => ("≈", Style::default().fg(Color::Blue)),
+            EventViewType::Chopping => ("¶", Style::default().fg(Color::Green)),
+            EventViewType::ToolBroke => ("✗", Style::default().fg(Color::Red)),
+            // Territory events
+            EventViewType::TerritoryMarked => ("▣", Style::default().fg(Color::Green)),
+            EventViewType::TerritoryChallenged => ("⚔", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            EventViewType::TerritorySubmitted => ("↓", Style::default().fg(Color::Cyan)),
+            EventViewType::TerritoryFight => ("⚔", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            EventViewType::TerritoryLost => ("▢", Style::default().fg(Color::DarkGray)),
+            // Structure events
+            EventViewType::FarmProduced => ("♠", Style::default().fg(Color::Green)),
+            EventViewType::StructureDestroyed => ("✗", Style::default().fg(Color::Red)),
+            // Trade events
+            EventViewType::TradeProposed => ("⇄", Style::default().fg(Color::Yellow)),
+            EventViewType::TradeAccepted => ("✓", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            EventViewType::TradeDeclined => ("✗", Style::default().fg(Color::Red)),
+            EventViewType::TradeCountered => ("↔", Style::default().fg(Color::Yellow)),
+            EventViewType::TradeExpired => ("⏱", Style::default().fg(Color::DarkGray)),
+            EventViewType::TradeCancelled => ("⊘", Style::default().fg(Color::DarkGray)),
+            EventViewType::TradeReneged => ("!", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            EventViewType::ServiceFulfilled => ("✓", Style::default().fg(Color::Cyan)),
             EventViewType::Meta => ("", Style::default().fg(Color::DarkGray)),
         };
 

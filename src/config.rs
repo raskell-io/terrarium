@@ -22,6 +22,8 @@ pub struct Config {
     pub aging: AgingConfig,
     #[serde(default)]
     pub skills: SkillsConfig,
+    #[serde(default)]
+    pub trade: TradeConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -212,6 +214,54 @@ fn default_decay_rate() -> f64 { 0.005 }
 fn default_decay_threshold_epochs() -> usize { 30 }
 fn default_min_level_to_teach() -> f64 { 0.5 }
 
+/// Trade system configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct TradeConfig {
+    /// Whether trading is enabled
+    #[serde(default = "default_trade_enabled")]
+    pub enabled: bool,
+    /// Default epochs until proposal expires
+    #[serde(default = "default_proposal_expiry")]
+    pub proposal_expiry_epochs: usize,
+    /// Maximum concurrent proposals per agent
+    #[serde(default = "default_max_proposals")]
+    pub max_pending_proposals: usize,
+    /// Trust penalty for declining trades
+    #[serde(default = "default_decline_trust_penalty")]
+    pub decline_trust_penalty: f64,
+    /// Trust penalty for reneging on promises
+    #[serde(default = "default_renege_trust_penalty")]
+    pub renege_trust_penalty: f64,
+    /// Trust bonus for fulfilling promises
+    #[serde(default = "default_fulfill_trust_bonus")]
+    pub fulfill_trust_bonus: f64,
+    /// Default deadline for promises (epochs from trade)
+    #[serde(default = "default_promise_deadline")]
+    pub default_promise_deadline: usize,
+}
+
+impl Default for TradeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            proposal_expiry_epochs: 5,
+            max_pending_proposals: 3,
+            decline_trust_penalty: 0.05,
+            renege_trust_penalty: 0.5,
+            fulfill_trust_bonus: 0.15,
+            default_promise_deadline: 20,
+        }
+    }
+}
+
+fn default_trade_enabled() -> bool { true }
+fn default_proposal_expiry() -> usize { 5 }
+fn default_max_proposals() -> usize { 3 }
+fn default_decline_trust_penalty() -> f64 { 0.05 }
+fn default_renege_trust_penalty() -> f64 { 0.5 }
+fn default_fulfill_trust_bonus() -> f64 { 0.15 }
+fn default_promise_deadline() -> usize { 20 }
+
 fn default_personality() -> String {
     "random".to_string()
 }
@@ -262,6 +312,7 @@ impl Default for Config {
             reproduction: ReproductionConfig::default(),
             aging: AgingConfig::default(),
             skills: SkillsConfig::default(),
+            trade: TradeConfig::default(),
         }
     }
 }

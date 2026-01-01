@@ -80,6 +80,9 @@ pub fn handle_key(key: KeyEvent, app: &mut App, engine: &Engine) -> bool {
         KeyCode::Char('e') | KeyCode::Char('E') => {
             app.show_events = !app.show_events;
         }
+        KeyCode::Char('t') | KeyCode::Char('T') => {
+            app.toggle_trades();
+        }
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.show_agent = !app.show_agent;
         }

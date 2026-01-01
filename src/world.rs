@@ -1,5 +1,26 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::structures::Structure;
+
+/// A territorial claim on a cell
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerritoryClaim {
+    /// The agent who owns this territory
+    pub owner: Uuid,
+    /// Agents allowed to use this territory
+    pub allowed_guests: Vec<Uuid>,
+    /// Epoch when the territory was claimed
+    pub claimed_epoch: usize,
+    /// Last epoch the owner was present (within 2 cells)
+    pub last_presence_epoch: usize,
+    /// Claim strength (1.0 = full, decays without presence)
+    pub strength: f64,
+}
+
+/// Terrain type alias for external modules
+pub type TerrainType = Terrain;
 
 /// The world: a grid of cells with terrain and resources
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +39,10 @@ pub struct Cell {
     pub terrain: Terrain,
     pub food: u32,
     pub food_capacity: u32,
+    /// Structure built in this cell (if any)
+    pub structure: Option<Structure>,
+    /// Territory claim on this cell (if any)
+    pub territory: Option<TerritoryClaim>,
 }
 
 /// Terrain types
@@ -62,6 +87,8 @@ impl World {
                     terrain,
                     food,
                     food_capacity,
+                    structure: None,
+                    territory: None,
                 });
             }
         }
@@ -153,10 +180,32 @@ impl World {
                 } else {
                     "no food"
                 };
-                format!("{} with {}", terrain_desc, food_desc)
+                let structure_desc = cell.structure.as_ref().map(|s| {
+                    format!(", {}", s.display_name())
+                }).unwrap_or_default();
+                let territory_desc = cell.territory.as_ref().map(|_| {
+                    " (claimed territory)"
+                }).unwrap_or_default();
+                format!("{} with {}{}{}", terrain_desc, food_desc, structure_desc, territory_desc)
             }
             None => "unknown".to_string(),
         }
+    }
+
+    /// Describe a cell's territory for agent perception (with owner name lookup)
+    pub fn describe_cell_territory(&self, x: usize, y: usize, agent_id: Uuid, get_name: impl Fn(Uuid) -> String) -> Option<String> {
+        self.get(x, y).and_then(|cell| {
+            cell.territory.as_ref().map(|t| {
+                let owner_name = get_name(t.owner);
+                if t.owner == agent_id {
+                    format!("your territory (strength: {:.0}%)", t.strength * 100.0)
+                } else if t.allowed_guests.contains(&agent_id) {
+                    format!("{}'s territory (you are a guest)", owner_name)
+                } else {
+                    format!("{}'s territory", owner_name)
+                }
+            })
+        })
     }
 
     /// Get a summary of visible area for an agent

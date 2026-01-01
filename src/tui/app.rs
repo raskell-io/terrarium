@@ -30,6 +30,9 @@ pub struct App {
 
     /// Show agent panel
     pub show_agent: bool,
+
+    /// Show trades panel (replaces events when active)
+    pub show_trades: bool,
 }
 
 impl App {
@@ -44,7 +47,13 @@ impl App {
             show_full_agent: false,
             show_events: true,
             show_agent: true,
+            show_trades: false,
         }
+    }
+
+    /// Toggle trades panel (switches between events and trades)
+    pub fn toggle_trades(&mut self) {
+        self.show_trades = !self.show_trades;
     }
 
     /// Toggle pause/play

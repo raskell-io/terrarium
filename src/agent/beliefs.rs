@@ -20,6 +20,20 @@ pub struct WorldBeliefs {
     pub food_locations: Vec<FoodLocationBelief>,
     /// Locations believed to be dangerous
     pub dangerous_locations: Vec<(usize, usize)>,
+    /// Known territory claims
+    pub territories: Vec<TerritoryBelief>,
+}
+
+/// Belief about territory at a location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerritoryBelief {
+    pub x: usize,
+    pub y: usize,
+    pub owner_id: Uuid,
+    pub owner_name: String,
+    pub last_seen_epoch: usize,
+    /// Whether this agent has permission to use the territory
+    pub is_allowed: bool,
 }
 
 /// Belief about food at a specific location
@@ -93,6 +107,48 @@ impl Beliefs {
                 },
             });
         }
+    }
+
+    /// Update belief about territory at a location
+    pub fn update_territory_belief(
+        &mut self,
+        x: usize,
+        y: usize,
+        owner_id: Uuid,
+        owner_name: &str,
+        is_allowed: bool,
+        epoch: usize,
+    ) {
+        if let Some(existing) = self.world.territories.iter_mut().find(|b| b.x == x && b.y == y) {
+            existing.owner_id = owner_id;
+            existing.owner_name = owner_name.to_string();
+            existing.is_allowed = is_allowed;
+            existing.last_seen_epoch = epoch;
+        } else {
+            self.world.territories.push(TerritoryBelief {
+                x,
+                y,
+                owner_id,
+                owner_name: owner_name.to_string(),
+                last_seen_epoch: epoch,
+                is_allowed,
+            });
+        }
+    }
+
+    /// Remove territory belief when territory is no longer claimed
+    pub fn remove_territory_belief(&mut self, x: usize, y: usize) {
+        self.world.territories.retain(|b| !(b.x == x && b.y == y));
+    }
+
+    /// Get territory belief at a location
+    pub fn get_territory_belief(&self, x: usize, y: usize) -> Option<&TerritoryBelief> {
+        self.world.territories.iter().find(|b| b.x == x && b.y == y)
+    }
+
+    /// Get all known territories owned by a specific agent
+    pub fn territories_owned_by(&self, owner_id: Uuid) -> Vec<&TerritoryBelief> {
+        self.world.territories.iter().filter(|b| b.owner_id == owner_id).collect()
     }
 
     /// Get or create social belief about another agent
@@ -185,6 +241,25 @@ impl Beliefs {
 
         if !food_beliefs.is_empty() {
             parts.push(format!("World knowledge: {}", food_beliefs.join("; ")));
+        }
+
+        // Territory beliefs
+        let territory_beliefs: Vec<String> = self
+            .world
+            .territories
+            .iter()
+            .filter(|t| current_epoch.saturating_sub(t.last_seen_epoch) < 15) // Recent beliefs
+            .map(|t| {
+                if t.is_allowed {
+                    format!("I have access to {}'s territory at ({}, {})", t.owner_name, t.x, t.y)
+                } else {
+                    format!("{} claims territory at ({}, {})", t.owner_name, t.x, t.y)
+                }
+            })
+            .collect();
+
+        if !territory_beliefs.is_empty() {
+            parts.push(format!("Territory knowledge: {}", territory_beliefs.join("; ")));
         }
 
         // Social beliefs

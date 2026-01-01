@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::config::AgingConfig;
+use crate::crafting::{MaterialType, Tool, ToolType};
 
 /// A single agent in the simulation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +216,156 @@ pub struct PhysicalState {
     pub food: u32,
     /// Age in epochs
     pub age: usize,
+    /// Materials inventory
+    #[serde(default)]
+    pub materials: HashMap<MaterialType, u32>,
+    /// Tools inventory
+    #[serde(default)]
+    pub tools: Vec<Tool>,
+    /// Currently sheltered at position (x, y) - None if not sheltered
+    #[serde(default)]
+    pub sheltered_at: Option<(usize, usize)>,
+}
+
+impl PhysicalState {
+    /// Add material to inventory
+    pub fn add_material(&mut self, material: MaterialType, amount: u32) {
+        *self.materials.entry(material).or_insert(0) += amount;
+    }
+
+    /// Remove material (returns actual amount removed)
+    pub fn remove_material(&mut self, material: MaterialType, amount: u32) -> u32 {
+        let current = self.materials.entry(material).or_insert(0);
+        let removed = amount.min(*current);
+        *current -= removed;
+        if *current == 0 {
+            self.materials.remove(&material);
+        }
+        removed
+    }
+
+    /// Get material count
+    pub fn material_count(&self, material: MaterialType) -> u32 {
+        self.materials.get(&material).copied().unwrap_or(0)
+    }
+
+    /// Get best tool for a skill (non-broken, highest bonus)
+    pub fn best_tool_for_skill(&self, skill: &str) -> Option<&Tool> {
+        self.tools
+            .iter()
+            .filter(|t| t.tool_type.primary_skill() == skill && !t.is_broken())
+            .max_by(|a, b| {
+                a.effective_bonus()
+                    .partial_cmp(&b.effective_bonus())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    /// Get mutable best tool for a skill
+    pub fn best_tool_for_skill_mut(&mut self, skill: &str) -> Option<&mut Tool> {
+        self.tools
+            .iter_mut()
+            .filter(|t| t.tool_type.primary_skill() == skill && !t.is_broken())
+            .max_by(|a, b| {
+                a.effective_bonus()
+                    .partial_cmp(&b.effective_bonus())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    /// Check if agent has a working tool of a type
+    pub fn has_tool(&self, tool_type: ToolType) -> bool {
+        self.tools
+            .iter()
+            .any(|t| t.tool_type == tool_type && !t.is_broken())
+    }
+
+    /// Get working tool by type
+    pub fn get_tool(&self, tool_type: ToolType) -> Option<&Tool> {
+        self.tools
+            .iter()
+            .find(|t| t.tool_type == tool_type && !t.is_broken())
+    }
+
+    /// Get actions unlocked by current tools
+    pub fn unlocked_actions(&self) -> Vec<&'static str> {
+        let mut actions = Vec::new();
+        for tool in &self.tools {
+            if !tool.is_broken() {
+                for action in tool.tool_type.unlocked_actions() {
+                    if !actions.contains(action) {
+                        actions.push(*action);
+                    }
+                }
+            }
+        }
+        actions
+    }
+
+    /// Remove broken tools, return the broken ones
+    pub fn cleanup_broken_tools(&mut self) -> Vec<Tool> {
+        let (broken, working): (Vec<_>, Vec<_>) = std::mem::take(&mut self.tools)
+            .into_iter()
+            .partition(|t| t.is_broken());
+        self.tools = working;
+        broken
+    }
+
+    /// Total tool bonus for a skill
+    pub fn tool_bonus_for_skill(&self, skill: &str) -> f64 {
+        self.best_tool_for_skill(skill)
+            .map(|t| t.effective_bonus())
+            .unwrap_or(0.0)
+    }
+
+    /// Check if agent is currently sheltered
+    pub fn is_sheltered(&self) -> bool {
+        self.sheltered_at.is_some()
+    }
+
+    /// Enter a shelter at position
+    pub fn enter_shelter(&mut self, x: usize, y: usize) {
+        self.sheltered_at = Some((x, y));
+    }
+
+    /// Leave the current shelter
+    pub fn leave_shelter(&mut self) {
+        self.sheltered_at = None;
+    }
+
+    /// Use a tool for an action (decrements durability)
+    pub fn use_tool_for_action(&mut self, action: &str) {
+        // Find the appropriate tool for this action and decrement durability
+        let tool_to_use = match action {
+            "hunt" => {
+                // Prefer bow, then spear
+                self.tools
+                    .iter_mut()
+                    .filter(|t| !t.is_broken())
+                    .find(|t| {
+                        t.tool_type == ToolType::Bow || t.tool_type == ToolType::WoodenSpear
+                    })
+            }
+            "fish" => self
+                .tools
+                .iter_mut()
+                .find(|t| t.tool_type == ToolType::FishingPole && !t.is_broken()),
+            "chop" => {
+                // Prefer flint axe, then stone axe
+                self.tools
+                    .iter_mut()
+                    .filter(|t| !t.is_broken())
+                    .find(|t| {
+                        t.tool_type == ToolType::FlintAxe || t.tool_type == ToolType::StoneAxe
+                    })
+            }
+            _ => None,
+        };
+
+        if let Some(tool) = tool_to_use {
+            tool.use_once();
+        }
+    }
 }
 
 /// Current active goal
@@ -247,6 +398,9 @@ impl Agent {
                 energy: 1.0,
                 food: starting_food,
                 age: 0,
+                materials: HashMap::new(),
+                tools: Vec::new(),
+                sheltered_at: None,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState::default(),
@@ -285,6 +439,9 @@ impl Agent {
                 energy: 0.8,
                 food: starting_food,
                 age: 0,
+                materials: HashMap::new(),
+                tools: Vec::new(),
+                sheltered_at: None,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState {

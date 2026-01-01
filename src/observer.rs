@@ -20,6 +20,25 @@ pub struct WorldView {
     pub cells: Vec<CellView>,
 }
 
+/// View of a structure for display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructureView {
+    pub structure_type: String,
+    pub display_name: String,
+    pub is_complete: bool,
+    pub build_percent: f64,
+    pub owner_name: Option<String>,
+}
+
+/// View of a territory claim for display
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerritoryView {
+    pub owner_id: Uuid,
+    pub owner_name: String,
+    pub strength: f64,
+    pub guest_count: usize,
+}
+
 /// View of a single cell
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellView {
@@ -28,6 +47,8 @@ pub struct CellView {
     pub terrain: Terrain,
     pub food: u32,
     pub occupants: Vec<Uuid>,
+    pub structure: Option<StructureView>,
+    pub territory: Option<TerritoryView>,
 }
 
 /// View of an agent's state
@@ -91,6 +112,36 @@ pub struct SkillView {
     pub level: f64,
 }
 
+/// View of a trade proposal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeProposalView {
+    pub id: Uuid,
+    pub proposer_name: String,
+    pub recipient_name: String,
+    pub offering: String,
+    pub requesting: String,
+    pub expires_in: usize,
+    pub status: String,
+}
+
+/// View of a service debt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceDebtView {
+    pub debtor_name: String,
+    pub creditor_name: String,
+    pub service: String,
+    pub deadline_in: Option<i64>,  // Negative = overdue
+    pub fulfilled: bool,
+    pub is_alliance: bool,
+}
+
+/// Combined view of all trade state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradeStateView {
+    pub pending_proposals: Vec<TradeProposalView>,
+    pub service_debts: Vec<ServiceDebtView>,
+}
+
 /// View of an event for display
 #[derive(Debug, Clone)]
 pub struct EventView {
@@ -109,6 +160,7 @@ pub enum EventViewType {
     Speech,
     Gift,
     Attack,
+    AllyIntervened,
     Death,
     Gossip,
     GroupFormed,
@@ -122,6 +174,31 @@ pub enum EventViewType {
     Conception,
     Birth,
     SkillTaught,
+    // Crafting
+    MaterialGathering,
+    Crafting,
+    Hunting,
+    Fishing,
+    Chopping,
+    ToolBroke,
+    // Territory
+    TerritoryMarked,
+    TerritoryChallenged,
+    TerritorySubmitted,
+    TerritoryFight,
+    TerritoryLost,
+    // Structures
+    FarmProduced,
+    StructureDestroyed,
+    // Trade
+    TradeProposed,
+    TradeAccepted,
+    TradeDeclined,
+    TradeCountered,
+    TradeExpired,
+    TradeCancelled,
+    TradeReneged,
+    ServiceFulfilled,
     Meta,
 }
 
@@ -137,12 +214,50 @@ impl WorldView {
                 .map(|a| a.id)
                 .collect();
 
+            // Build structure view if present
+            let structure = cell.structure.as_ref().map(|s| {
+                let owner_name = agents
+                    .iter()
+                    .find(|a| a.id == s.owner)
+                    .map(|a| a.name().to_string());
+
+                StructureView {
+                    structure_type: format!("{:?}", s.structure_type),
+                    display_name: s.display_name(),
+                    is_complete: s.is_complete(),
+                    build_percent: if s.build_required > 0 {
+                        (s.build_progress as f64 / s.build_required as f64) * 100.0
+                    } else {
+                        100.0
+                    },
+                    owner_name,
+                }
+            });
+
+            // Build territory view if present
+            let territory = cell.territory.as_ref().map(|t| {
+                let owner_name = agents
+                    .iter()
+                    .find(|a| a.id == t.owner)
+                    .map(|a| a.name().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                TerritoryView {
+                    owner_id: t.owner,
+                    owner_name,
+                    strength: t.strength,
+                    guest_count: t.allowed_guests.len(),
+                }
+            });
+
             cells.push(CellView {
                 x: cell.x,
                 y: cell.y,
                 terrain: cell.terrain,
                 food: cell.food,
                 occupants,
+                structure,
+                territory,
             });
         }
 
@@ -372,6 +487,16 @@ impl EventView {
                     EventViewType::Attack,
                 )
             }
+            EventType::AllyIntervened => {
+                let target_name = agent_name(event.target?);
+                let ally_id = event.data.ally?;
+                let ally_name = agent_name(ally_id);
+                let reduction = event.data.damage_reduction.unwrap_or(0.0) * 100.0;
+                (
+                    format!("{} defended {} ({:.0}% damage reduction)", ally_name, target_name, reduction),
+                    EventViewType::AllyIntervened,
+                )
+            }
             EventType::Died => {
                 let name = agent_name(event.agent?);
                 let cause = event.data.description.as_deref().unwrap_or("unknown causes");
@@ -493,6 +618,205 @@ impl EventView {
                 (
                     format!("{} taught {} to {} ({:.0}%)", teacher, skill, student, level * 100.0),
                     EventViewType::SkillTaught,
+                )
+            }
+            EventType::GatheredMaterials => {
+                let name = agent_name(event.agent?);
+                let materials = event.data.materials.as_ref()
+                    .map(|m| {
+                        m.iter()
+                            .map(|(mat, amt)| format!("{} {}", amt, mat))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "materials".to_string());
+                (
+                    format!("{} gathered {}", name, materials),
+                    EventViewType::MaterialGathering,
+                )
+            }
+            EventType::Crafted => {
+                let name = agent_name(event.agent?);
+                let tool = event.data.tool_name.as_deref().unwrap_or("tool");
+                let quality = event.data.tool_quality.as_deref().unwrap_or("");
+                (
+                    format!("{} crafted a {} {}", name, quality, tool),
+                    EventViewType::Crafting,
+                )
+            }
+            EventType::Hunted => {
+                let name = agent_name(event.agent?);
+                let success = event.data.success.unwrap_or(false);
+                if success {
+                    let amount = event.data.amount.unwrap_or(0);
+                    (
+                        format!("{} hunted successfully ({} food)", name, amount),
+                        EventViewType::Hunting,
+                    )
+                } else {
+                    (
+                        format!("{} failed to catch prey", name),
+                        EventViewType::Hunting,
+                    )
+                }
+            }
+            EventType::Fished => {
+                let name = agent_name(event.agent?);
+                let success = event.data.success.unwrap_or(false);
+                if success {
+                    let amount = event.data.amount.unwrap_or(0);
+                    (
+                        format!("{} caught {} fish", name, amount),
+                        EventViewType::Fishing,
+                    )
+                } else {
+                    (
+                        format!("{} failed to catch any fish", name),
+                        EventViewType::Fishing,
+                    )
+                }
+            }
+            EventType::Chopped => {
+                let name = agent_name(event.agent?);
+                let amount = event.data.amount.unwrap_or(0);
+                (
+                    format!("{} chopped {} wood", name, amount),
+                    EventViewType::Chopping,
+                )
+            }
+            EventType::ToolBroke => {
+                let name = agent_name(event.agent?);
+                let tool = event.data.tool_name.as_deref().unwrap_or("tool");
+                (
+                    format!("{}'s {} broke", name, tool),
+                    EventViewType::ToolBroke,
+                )
+            }
+            EventType::TerritoryMarked => {
+                let name = agent_name(event.agent?);
+                let x = event.data.territory_x.unwrap_or(0);
+                let y = event.data.territory_y.unwrap_or(0);
+                (
+                    format!("{} marked territory at ({}, {})", name, x, y),
+                    EventViewType::TerritoryMarked,
+                )
+            }
+            EventType::TerritoryChallenged => {
+                let name = agent_name(event.agent?);
+                let target_name = agent_name(event.target?);
+                (
+                    format!("{} challenged {} for trespassing", name, target_name),
+                    EventViewType::TerritoryChallenged,
+                )
+            }
+            EventType::TerritorySubmitted => {
+                let trespasser = agent_name(event.target?);
+                (
+                    format!("{} submitted and left the territory", trespasser),
+                    EventViewType::TerritorySubmitted,
+                )
+            }
+            EventType::TerritoryFight => {
+                let challenger = agent_name(event.agent?);
+                let trespasser = agent_name(event.target?);
+                let winner = event.data.winner.map(agent_name).unwrap_or_else(|| "Unknown".to_string());
+                (
+                    format!("{} and {} fought over territory - {} won", challenger, trespasser, winner),
+                    EventViewType::TerritoryFight,
+                )
+            }
+            EventType::TerritoryLost => {
+                let name = agent_name(event.agent?);
+                let x = event.data.territory_x.unwrap_or(0);
+                let y = event.data.territory_y.unwrap_or(0);
+                (
+                    format!("{} lost territory at ({}, {})", name, x, y),
+                    EventViewType::TerritoryLost,
+                )
+            }
+            EventType::FarmProduced => {
+                let name = agent_name(event.agent?);
+                let amount = event.data.amount.unwrap_or(0);
+                (
+                    format!("{}'s farm produced {} food", name, amount),
+                    EventViewType::FarmProduced,
+                )
+            }
+            EventType::StructureDestroyed => {
+                let name = agent_name(event.agent?);
+                let structure_type = event.data.description.as_deref().unwrap_or("structure");
+                (
+                    format!("{}'s {} collapsed", name, structure_type),
+                    EventViewType::StructureDestroyed,
+                )
+            }
+            // Trade events
+            EventType::TradeProposed => {
+                let proposer = agent_name(event.agent?);
+                let recipient = agent_name(event.target?);
+                let offering = event.data.trade_offering.as_deref().unwrap_or("items");
+                let requesting = event.data.trade_requesting.as_deref().unwrap_or("items");
+                (
+                    format!("{} offers {} to {} for {}", proposer, offering, recipient, requesting),
+                    EventViewType::TradeProposed,
+                )
+            }
+            EventType::TradeAccepted => {
+                let accepter = agent_name(event.agent?);
+                let proposer = agent_name(event.target?);
+                (
+                    format!("{} accepted trade from {}", accepter, proposer),
+                    EventViewType::TradeAccepted,
+                )
+            }
+            EventType::TradeDeclined => {
+                let decliner = agent_name(event.agent?);
+                let proposer = agent_name(event.target?);
+                (
+                    format!("{} declined trade from {}", decliner, proposer),
+                    EventViewType::TradeDeclined,
+                )
+            }
+            EventType::TradeCountered => {
+                let counter = agent_name(event.agent?);
+                let original = agent_name(event.target?);
+                let offering = event.data.trade_offering.as_deref().unwrap_or("items");
+                let requesting = event.data.trade_requesting.as_deref().unwrap_or("items");
+                (
+                    format!("{} counter-offers {} for {}", counter, offering, requesting),
+                    EventViewType::TradeCountered,
+                )
+            }
+            EventType::TradeExpired => {
+                let proposer = agent_name(event.agent?);
+                (
+                    format!("{}'s trade offer expired", proposer),
+                    EventViewType::TradeExpired,
+                )
+            }
+            EventType::TradeCancelled => {
+                let proposer = agent_name(event.agent?);
+                (
+                    format!("{} cancelled their trade offer", proposer),
+                    EventViewType::TradeCancelled,
+                )
+            }
+            EventType::TradeReneged => {
+                let debtor = agent_name(event.agent?);
+                let creditor = agent_name(event.target?);
+                let service = event.data.service_type.as_deref().unwrap_or("promise");
+                (
+                    format!("{} broke their {} promise to {}", debtor, service, creditor),
+                    EventViewType::TradeReneged,
+                )
+            }
+            EventType::ServiceFulfilled => {
+                let debtor = agent_name(event.agent?);
+                let creditor = agent_name(event.target?);
+                let service = event.data.service_type.as_deref().unwrap_or("promise");
+                (
+                    format!("{} fulfilled their {} to {}", debtor, service, creditor),
+                    EventViewType::ServiceFulfilled,
                 )
             }
         };

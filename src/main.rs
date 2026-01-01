@@ -6,12 +6,15 @@ use tracing_subscriber::EnvFilter;
 mod action;
 mod agent;
 mod config;
+mod crafting;
 mod engine;
 mod environment;
 mod groups;
 mod llm;
 mod observation;
 mod observer;
+mod structures;
+mod trade;
 mod tui;
 mod world;
 

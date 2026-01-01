@@ -127,10 +127,51 @@ impl Chronicle {
                 let target = target_name?;
                 Some(format!("**{}** attacked **{}**!", agent, target))
             }
+            EventType::AllyIntervened => {
+                let target = target_name?;
+                let ally_name = event.data.ally.and_then(|id| self.agent_names.get(&id))?;
+                let reduction = event.data.damage_reduction.unwrap_or(0.0) * 100.0;
+                Some(format!("**{}** defended **{}**, reducing damage by {:.0}%.", ally_name, target, reduction))
+            }
             EventType::Died => {
                 let agent = agent_name?;
                 let cause = event.data.description.as_deref().unwrap_or("unknown causes");
                 Some(format!("**{}** has died from {}.", agent, cause))
+            }
+            EventType::TradeProposed => {
+                let agent = agent_name?;
+                let target = target_name?;
+                let offering = event.data.trade_offering.as_deref().unwrap_or("items");
+                let requesting = event.data.trade_requesting.as_deref().unwrap_or("items");
+                Some(format!("**{}** proposed a trade to **{}**: offering {} for {}.", agent, target, offering, requesting))
+            }
+            EventType::TradeAccepted => {
+                let agent = agent_name?;
+                let target = target_name?;
+                Some(format!("**{}** accepted a trade from **{}**.", agent, target))
+            }
+            EventType::TradeDeclined => {
+                let agent = agent_name?;
+                let target = target_name?;
+                Some(format!("**{}** declined a trade from **{}**.", agent, target))
+            }
+            EventType::TradeCountered => {
+                let agent = agent_name?;
+                let target = target_name?;
+                let offering = event.data.trade_offering.as_deref().unwrap_or("items");
+                let requesting = event.data.trade_requesting.as_deref().unwrap_or("items");
+                Some(format!("**{}** counter-offered to **{}**: offering {} for {}.", agent, target, offering, requesting))
+            }
+            EventType::TradeExpired => {
+                let agent = agent_name?;
+                let target = target_name?;
+                Some(format!("A trade proposal from **{}** to **{}** expired.", agent, target))
+            }
+            EventType::TradeReneged => {
+                let agent = agent_name?;
+                let target = target_name?;
+                let service = event.data.service_type.as_deref().unwrap_or("their promise");
+                Some(format!("**{}** reneged on {} to **{}**!", agent, service, target))
             }
             _ => None, // Don't narrate routine events
         }
