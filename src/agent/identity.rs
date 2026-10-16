@@ -1,5 +1,5 @@
 use rand::prelude::IndexedRandom;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -189,7 +189,7 @@ impl Identity {
         let all_values_vec: Vec<Value> = all_parent_values.into_iter().collect();
         let count = rng.random_range(2..=3.min(all_values_vec.len()));
         let values: Vec<Value> = all_values_vec
-            .choose_multiple(&mut rng, count)
+            .sample(&mut rng, count)
             .copied()
             .collect();
 
@@ -223,7 +223,7 @@ impl Identity {
         ];
         let count = rng.random_range(2..=3);
         let mut values: Vec<Value> = all_values
-            .choose_multiple(&mut rng, count)
+            .sample(&mut rng, count)
             .copied()
             .collect();
 

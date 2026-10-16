@@ -2,6 +2,7 @@
 name = "terrarium"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.99"
 description = "A societal simulation engine where LLM-powered agents form emergent civilizations"
 license = "MIT"
 repository = "https://github.com/raskell-io/terrarium"
@@ -15,13 +16,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # HTTP client for LLM APIs
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # Random number generation
-rand = "0.9"
+rand = "0.10"
 
 # Unique identifiers
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -38,11 +39,11 @@ thiserror = "2"
 anyhow = "1"
 
 # Configuration
-toml = "0.8"
+toml = "1"
 
 # TUI
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 [[bin]]
 name = "terrarium"

@@ -352,7 +352,7 @@ fn heuristic_action(
     pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
     debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
 ) -> Action {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
 
     // Priority 0a: Fulfill debts to nearby creditors

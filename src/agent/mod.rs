@@ -6,7 +6,7 @@ pub use beliefs::Beliefs;
 pub use identity::{Aspiration, Identity, Personality, Value};
 pub use memory::{Episode, EpisodeCategory, Memory};
 
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;

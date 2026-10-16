@@ -1853,7 +1853,7 @@ impl Engine {
                             Direction::North, Direction::South, Direction::East, Direction::West,
                             Direction::NorthEast, Direction::NorthWest, Direction::SouthEast, Direction::SouthWest,
                         ];
-                        use rand::Rng;
+                        use rand::RngExt;
                         let mut rng = rand::rng();
                         let dir = directions[rng.random_range(0..8)];
                         let (dx, dy) = dir.delta();
@@ -1970,7 +1970,7 @@ impl Engine {
                                 let directions = [
                                     Direction::North, Direction::South, Direction::East, Direction::West,
                                 ];
-                                use rand::Rng;
+                                use rand::RngExt;
                                 let mut rng = rand::rng();
                                 let dir = directions[rng.random_range(0..4)];
                                 let (dx, dy) = dir.delta();
@@ -2562,7 +2562,7 @@ impl Engine {
             return Ok(());
         }
 
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
         let aging_config = &self.config.aging;
 
