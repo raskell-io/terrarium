@@ -50,10 +50,12 @@ pub fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
     if rng.random::<f64>() < x.fract() { base + 1 } else { base }
 }
 
-/// Which land cells are fertile. A random fertility field is smoothed `clustering` times
-/// (each cell averaged with its neighbours), land beside water gets a boost, and the most
-/// fertile `fertile_fraction` of land becomes fertile, so the fraction is exact and patchy
-fn fertile_land(config: &WorldConfig, water: &[bool], rng: &mut impl RngExt) -> Vec<bool> {
+/// Which land cells are fertile, and how high each cell lies. A random fertility field is
+/// smoothed `clustering` times (each cell averaged with its neighbours), land beside water gets
+/// a boost, and the most fertile `fertile_fraction` of land becomes fertile, so the fraction is
+/// exact and patchy. The same field gives the relief: fertile valleys lie low, barren uplands
+/// high (elevation is the cell's rank, 0 lowest land to 1 highest; water is 0)
+fn fertile_land(config: &WorldConfig, water: &[bool], rng: &mut impl RngExt) -> (Vec<bool>, Vec<f64>) {
     let (w, h) = (config.width, config.height);
     let neighbours = |i: usize| {
         let (x, y) = ((i % w) as i64, (i / w) as i64);
@@ -87,7 +89,12 @@ fn fertile_land(config: &WorldConfig, water: &[bool], rng: &mut impl RngExt) -> 
     for &i in land.iter().take(count) {
         fertile[i] = true;
     }
-    fertile
+    let mut elevation = vec![0.0; w * h];
+    let span = land.len().saturating_sub(1).max(1) as f64;
+    for (rank, &i) in land.iter().enumerate() {
+        elevation[i] = rank as f64 / span;
+    }
+    (fertile, elevation)
 }
 
 /// Flood a lake of `size` orthogonally connected cells outward from a random dry cell
@@ -157,6 +164,25 @@ pub struct Cell {
     pub fish: f64,
     #[serde(default)]
     pub fish_capacity: f64,
+    /// Height of the land, 0 (lowest) to 1 (highest)
+    #[serde(default)]
+    pub elevation: f64,
+}
+
+/// Extra energy per unit of elevation climbed (a climb from the lowest to the highest land in
+/// one step costs three times a level step)
+const CLIMB_COST: f64 = 2.0;
+/// Energy multiplier for stepping into thick forest
+const FOREST_COST: f64 = 1.5;
+
+/// Land this high counts as high ground: one can see further from it
+pub const HIGH_GROUND: f64 = 0.8;
+
+impl Cell {
+    /// Thick forest: a stand at least two-thirds grown
+    pub fn is_forest(&self) -> bool {
+        self.wood_capacity > 0 && self.wood * 3 >= self.wood_capacity * 2
+    }
 }
 
 /// Terrain types
@@ -281,7 +307,8 @@ impl Default for MaterialsConfig {
 }
 
 fn default_wood_capacity() -> u32 { 30 }
-fn default_wood_regrowth() -> f64 { 0.1 }
+// A meadow takes about a year (100 days) to grow into thick forest
+fn default_wood_regrowth() -> f64 { 0.02 }
 fn default_stone() -> u32 { 40 }
 
 impl World {
@@ -296,7 +323,7 @@ impl World {
             dig_lake(&mut water, config.width, config.height, config.water.lake_size, &mut rng);
         }
 
-        let fertile = fertile_land(config, &water, &mut rng);
+        let (fertile, elevation) = fertile_land(config, &water, &mut rng);
 
         for y in 0..config.height {
             for x in 0..config.width {
@@ -332,13 +359,15 @@ impl World {
                     food_capacity,
                     structure: None,
                     territory: None,
-                    wood,
+                    // A mix of meadow and woodland: stands start 20-100% grown
+                    wood: (wood as f64 * rng.random_range(0.2..=1.0)).round() as u32,
                     wood_capacity: wood,
                     stone,
                     game: game_capacity,
                     game_capacity,
                     fish,
                     fish_capacity: fish,
+                    elevation: elevation[y * config.width + x],
                 });
             }
         }
@@ -593,12 +622,18 @@ impl World {
                     " (claimed territory)"
                 }).unwrap_or_default();
                 let materials_desc = match cell.terrain {
+                    Terrain::Fertile if cell.is_forest() => ", thick forest",
                     Terrain::Fertile if cell.wood * 2 >= cell.wood_capacity => ", wooded",
                     Terrain::Fertile if cell.wood > 0 => ", sparse brush",
                     Terrain::Fertile => ", stripped of wood",
                     Terrain::Barren if cell.stone > 0 => ", stony",
                     Terrain::Barren => ", quarried out",
                     Terrain::Water => "",
+                };
+                let relief_desc = if cell.terrain != Terrain::Water && cell.elevation >= HIGH_GROUND {
+                    ", high ground"
+                } else {
+                    ""
                 };
                 let game_desc = if cell.game >= 1.5 {
                     ", tracks of game"
@@ -607,7 +642,7 @@ impl World {
                 } else {
                     ""
                 };
-                format!("{} with {}{}{}{}{}", terrain_desc, food_desc, materials_desc, game_desc, structure_desc, territory_desc)
+                format!("{} with {}{}{}{}{}{}", terrain_desc, food_desc, materials_desc, relief_desc, game_desc, structure_desc, territory_desc)
             }
             None => "unknown".to_string(),
         }
@@ -640,6 +675,26 @@ impl World {
                 .map(|c| (c.x, c.y, c.food))
                 .collect(),
         }
+    }
+
+    /// How far one can see from (x, y): further from high ground, only to the next cell from
+    /// inside thick forest
+    pub fn sight_from(&self, x: usize, y: usize, base: usize) -> usize {
+        match self.get(x, y) {
+            Some(c) if c.is_forest() => base.min(1),
+            Some(c) if c.elevation >= HIGH_GROUND => base + 1,
+            _ => base,
+        }
+    }
+
+    /// Energy multiplier for stepping from one cell to another: climbing costs more, and so
+    /// does pushing into thick forest
+    pub fn step_cost(&self, from: (usize, usize), to: (usize, usize)) -> f64 {
+        let (Some(a), Some(b)) = (self.get(from.0, from.1), self.get(to.0, to.1)) else {
+            return 1.0;
+        };
+        let climb = (b.elevation - a.elevation).max(0.0);
+        (1.0 + CLIMB_COST * climb) * if b.is_forest() { FOREST_COST } else { 1.0 }
     }
 
     /// Cells within `radius` steps of (x, y), including it
@@ -754,7 +809,9 @@ mod tests {
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.wood).sum::<u32>();
-        assert_eq!(total(&world), 3000);
+        assert!((600..=3000).contains(&total(&world)), "stands start part-grown");
+        world.wood_regrowth = 0.1;
+        for c in &mut world.cells { c.wood = 30; }
         world.regrow_wood(1.0);
         assert_eq!(total(&world), 3000, "full stands don't grow");
 
@@ -916,6 +973,35 @@ mod tests {
         assert!((0.24..0.36).contains(&edge_share), "edge cells fertile: {}", edge_share);
         assert!((0.25..0.35).contains(&scattered), "scattered: {}", scattered);
         assert!(patchy > 0.5, "patchy: {}", patchy);
+    }
+
+    #[test]
+    fn test_relief_and_forest_shape_movement_and_sight() {
+        let config = WorldConfig {
+            width: 10, height: 10, fertile_fraction: 0.3, initial_food_per_fertile: 10, food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig { growth: 0.0, ..WildlifeConfig::default() },
+            water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
+        };
+        let mut world = World::new(&config);
+        // Fertile valleys lie lower than barren uplands
+        let mean = |t: Terrain| {
+            let e: Vec<f64> = world.cells.iter().filter(|c| c.terrain == t).map(|c| c.elevation).collect();
+            e.iter().sum::<f64>() / e.len() as f64
+        };
+        assert!(mean(Terrain::Fertile) < mean(Terrain::Barren));
+
+        for c in &mut world.cells { c.elevation = 0.5; c.wood = 0; c.wood_capacity = 0; }
+        world.get_mut(1, 0).unwrap().elevation = 1.0;
+        assert!((world.step_cost((0, 0), (1, 0)) - 2.0).abs() < 1e-9, "climbing half the relief doubles the cost");
+        assert!((world.step_cost((1, 0), (0, 0)) - 1.0).abs() < 1e-9, "going down is level cost");
+        assert_eq!(world.sight_from(1, 0, 2), 3, "high ground sees further");
+        let forest = world.get_mut(5, 5).unwrap();
+        forest.wood_capacity = 30;
+        forest.wood = 25;
+        assert_eq!(world.sight_from(5, 5, 2), 1, "thick forest closes the view");
+        assert!((world.step_cost((4, 5), (5, 5)) - 1.5).abs() < 1e-9);
     }
 
     #[test]

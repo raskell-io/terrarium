@@ -429,7 +429,7 @@ impl Engine {
             }
 
             // Get perception (world + environment)
-            let radius = self.config.agents.view_radius;
+            let radius = self.world.sight_from(agent.physical.x, agent.physical.y, self.config.agents.view_radius);
             let mut world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y, radius);
             // People are visible from afar; talking, giving or fighting still needs adjacency
             let distant: Vec<String> = self
@@ -646,8 +646,8 @@ impl Engine {
                         agent.physical.y = new_y;
                         // Walking away leaves the shelter (protection is tied to being there)
                         agent.physical.leave_shelter();
-                        // Movement cost affected by environment and age (elderly use more energy)
-                        let movement_cost = base_movement_cost / age_mod;
+                        // Movement cost affected by terrain (climbing, forest), environment and age
+                        let movement_cost = base_movement_cost * self.world.step_cost(from, (new_x, new_y)) / age_mod;
                         agent.physical.energy = (agent.physical.energy - movement_cost).max(0.0);
 
                         self.log_and_track(Event::moved(
@@ -2521,7 +2521,8 @@ impl Engine {
 
             // Everything in view updates what the agent believes about food there, including
             // that it has run out; places out of sight keep their (possibly stale) beliefs
-            for seen in self.world.visible_cells(pos.0, pos.1, self.config.agents.view_radius) {
+            let sight = self.world.sight_from(pos.0, pos.1, self.config.agents.view_radius);
+            for seen in self.world.visible_cells(pos.0, pos.1, sight) {
                 if seen.food > 0 || agent.beliefs.world.food_locations.iter().any(|b| (b.x, b.y) == (seen.x, seen.y)) {
                     agent.beliefs.update_food_belief(seen.x, seen.y, seen.food, epoch);
                 }

@@ -19,7 +19,7 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 # Building materials (defaults shown)
 # [world.materials]
 # wood_per_fertile = 30     # Wood and fiber a fertile cell holds when fully grown
-# wood_regrowth = 0.1       # Logistic rate: growth = r * W * (1 - W/K)
+# wood_regrowth = 0.02      # Logistic rate: growth = r * W * (1 - W/K); meadow to forest in ~a year
 # stone_per_barren = 40     # Finite: quarried stone never comes back
 
 # Wild game (defaults shown)

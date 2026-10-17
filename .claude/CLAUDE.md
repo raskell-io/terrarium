@@ -58,6 +58,8 @@ PHYSICAL (hard rules)
 ├── Bodies: hunger, energy, health, position
 ├── Resources: food regenerates slowly
 ├── Materials: wood/fiber stands regrow logistically; stone is finite
+├── Relief: valleys and uplands (climbing costs energy, high ground sees further);
+│   thick forest slows movement and closes the view
 ├── Wildlife: herds breed seasonally, wander, and can be hunted out
 ├── Weather: random droughts and storms on top of the seasons (opt-in)
 └── Disease: contagion between neighbours, recovery with immunity (opt-in)
