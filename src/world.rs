@@ -32,7 +32,15 @@ pub struct World {
     /// Logistic regrowth rate of wood and fiber stands
     #[serde(default)]
     pub wood_regrowth: f64,
+    /// Wild game: logistic growth rate and the share of each herd that wanders off daily
+    #[serde(default)]
+    pub game_growth: f64,
+    #[serde(default)]
+    pub game_dispersal: f64,
 }
+
+/// Days of undisturbed breeding and wandering simulated before a world begins
+const WILDLIFE_SETTLING_DAYS: usize = 500;
 
 /// Round to an integer randomly, so the expected value equals `x`
 pub fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
@@ -69,6 +77,11 @@ pub struct Cell {
     /// Stone (and flint) on barren land; finite, never comes back once quarried
     #[serde(default)]
     pub stone: u32,
+    /// Wild game living here (animals), and how many the land here can support
+    #[serde(default)]
+    pub game: f64,
+    #[serde(default)]
+    pub game_capacity: f64,
 }
 
 /// Terrain types
@@ -88,7 +101,42 @@ pub struct WorldConfig {
     pub food_regen_rate: f64,
     #[serde(default)]
     pub materials: MaterialsConfig,
+    #[serde(default)]
+    pub wildlife: WildlifeConfig,
 }
+
+/// Wild game: herds that breed, wander and can be hunted out
+#[derive(Debug, Clone, Deserialize)]
+pub struct WildlifeConfig {
+    /// Animals a fertile cell supports
+    #[serde(default = "default_game_fertile")]
+    pub game_per_fertile: f64,
+    /// Animals a barren cell supports
+    #[serde(default = "default_game_barren")]
+    pub game_per_barren: f64,
+    /// Logistic growth rate per day in the breeding seasons
+    #[serde(default = "default_game_growth")]
+    pub growth: f64,
+    /// Share of each herd that moves to neighbouring cells each day
+    #[serde(default = "default_game_dispersal")]
+    pub dispersal: f64,
+}
+
+impl Default for WildlifeConfig {
+    fn default() -> Self {
+        Self {
+            game_per_fertile: default_game_fertile(),
+            game_per_barren: default_game_barren(),
+            growth: default_game_growth(),
+            dispersal: default_game_dispersal(),
+        }
+    }
+}
+
+fn default_game_fertile() -> f64 { 2.0 }
+fn default_game_barren() -> f64 { 0.3 }
+fn default_game_growth() -> f64 { 0.03 }
+fn default_game_dispersal() -> f64 { 0.1 }
 
 /// Building materials in the landscape
 #[derive(Debug, Clone, Deserialize)]
@@ -140,6 +188,10 @@ impl World {
                     Terrain::Fertile => (config.materials.wood_per_fertile, 0),
                     Terrain::Barren => (0, config.materials.stone_per_barren),
                 };
+                let game_capacity = match terrain {
+                    Terrain::Fertile => config.wildlife.game_per_fertile,
+                    Terrain::Barren => config.wildlife.game_per_barren,
+                };
 
                 cells.push(Cell {
                     x,
@@ -152,17 +204,29 @@ impl World {
                     wood,
                     wood_capacity: wood,
                     stone,
+                    game: game_capacity,
+                    game_capacity,
                 });
             }
         }
 
-        Self {
+        let mut world = Self {
             width: config.width,
             height: config.height,
             cells,
             epoch: 0,
             wood_regrowth: config.materials.wood_regrowth,
+            game_growth: config.wildlife.growth,
+            game_dispersal: config.wildlife.dispersal,
+        };
+        // Herds wander from rich land into poor land that can't sustain them (sources and sinks),
+        // so the steady state sits below capacity. Start the world there rather than at capacity
+        if world.game_growth > 0.0 {
+            for _ in 0..WILDLIFE_SETTLING_DAYS {
+                world.update_wildlife(1.0);
+            }
         }
+        world
     }
 
     /// Get cell at coordinates
@@ -237,6 +301,55 @@ impl World {
         }
     }
 
+    /// Wild game breeds logistically (r * N * (1 - N / K)) in the seasons that allow it; herds
+    /// above what their land supports shrink. Then a share of every herd wanders to the
+    /// neighbouring cells, so hunted-out ground slowly refills from around it
+    pub fn update_wildlife(&mut self, breeding: f64) {
+        let r = self.game_growth * breeding;
+        for cell in &mut self.cells {
+            let k = cell.game_capacity;
+            if k > 0.0 {
+                cell.game = (cell.game + r * cell.game * (1.0 - cell.game / k)).max(0.0);
+            } else {
+                cell.game *= 1.0 - self.game_growth;
+            }
+        }
+        if self.game_dispersal <= 0.0 {
+            return;
+        }
+        let mut inflow = vec![0.0; self.cells.len()];
+        for i in 0..self.cells.len() {
+            let (x, y) = (self.cells[i].x, self.cells[i].y);
+            let targets: Vec<usize> = self.adjacent(x, y).iter().map(|c| c.y * self.width + c.x).collect();
+            let leaving = self.cells[i].game * self.game_dispersal;
+            inflow[i] -= leaving;
+            for t in &targets {
+                inflow[*t] += leaving / targets.len() as f64;
+            }
+        }
+        for (cell, delta) in self.cells.iter_mut().zip(inflow) {
+            cell.game = (cell.game + delta).max(0.0);
+        }
+    }
+
+    /// Animals within a hunter's range: this cell and the eight around it
+    pub fn game_around(&self, x: usize, y: usize) -> f64 {
+        self.get(x, y).map_or(0.0, |c| c.game) + self.adjacent(x, y).iter().map(|c| c.game).sum::<f64>()
+    }
+
+    /// Remove one animal killed by a hunter at (x, y), from the cell in range with the most game
+    pub fn take_game(&mut self, x: usize, y: usize) {
+        let mut range: Vec<(usize, usize)> = self.adjacent(x, y).iter().map(|c| (c.x, c.y)).collect();
+        range.push((x, y));
+        if let Some(&(bx, by)) = range
+            .iter()
+            .max_by(|a, b| self.get(a.0, a.1).unwrap().game.total_cmp(&self.get(b.0, b.1).unwrap().game))
+        {
+            let cell = self.get_mut(bx, by).unwrap();
+            cell.game = (cell.game - 1.0).max(0.0);
+        }
+    }
+
     /// Standing food dies back by the given fraction (e.g. in winter)
     pub fn decay_food(&mut self, fraction: f64) {
         if fraction <= 0.0 {
@@ -258,6 +371,7 @@ impl World {
         self.decay_food(food_decay);
         self.regenerate_resources(regen_rate, food_regen_modifier);
         self.regrow_wood(food_regen_modifier.min(1.0));
+        self.update_wildlife(food_regen_modifier);
     }
 
     /// Describe a cell for agent perception
@@ -290,7 +404,14 @@ impl World {
                     Terrain::Barren if cell.stone > 0 => ", stony",
                     Terrain::Barren => ", quarried out",
                 };
-                format!("{} with {}{}{}{}", terrain_desc, food_desc, materials_desc, structure_desc, territory_desc)
+                let game_desc = if cell.game >= 1.5 {
+                    ", tracks of game"
+                } else if cell.game >= 0.5 {
+                    ", a few animal tracks"
+                } else {
+                    ""
+                };
+                format!("{} with {}{}{}{}{}", terrain_desc, food_desc, materials_desc, game_desc, structure_desc, territory_desc)
             }
             None => "unknown".to_string(),
         }
@@ -386,6 +507,7 @@ mod tests {
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
             materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig::default(),
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.food).sum::<u32>();
@@ -410,6 +532,7 @@ mod tests {
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
             materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig::default(),
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.wood).sum::<u32>();
@@ -433,6 +556,44 @@ mod tests {
     }
 
     #[test]
+    fn test_game_breeds_wanders_and_can_be_hunted_out() {
+        let config = WorldConfig {
+            width: 5,
+            height: 5,
+            fertile_fraction: 1.0,
+            initial_food_per_fertile: 10,
+            food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig { growth: 0.0, ..WildlifeConfig::default() },
+        };
+        let mut world = World::new(&config);
+        let total = |w: &World| w.cells.iter().map(|c| c.game).sum::<f64>();
+        assert!((total(&world) - 50.0).abs() < 1e-9, "without breeding there is nothing to settle");
+
+        // Wandering moves animals around but never creates or destroys them
+        world.get_mut(2, 2).unwrap().game = 20.0;
+        world.update_wildlife(1.0);
+        assert!((total(&world) - 68.0).abs() < 1e-9);
+        assert!(world.get(2, 2).unwrap().game < 20.0);
+
+        // Hunting takes animals out of the range
+        let before = world.game_around(2, 2);
+        world.take_game(2, 2);
+        assert!((world.game_around(2, 2) - (before - 1.0)).abs() < 1e-9);
+
+        // With breeding, a depleted herd recovers toward what the land supports, not beyond
+        world.game_growth = 0.1;
+        world.game_dispersal = 0.0;
+        for c in &mut world.cells { c.game = 0.5; }
+        for _ in 0..200 { world.update_wildlife(1.0); }
+        assert!(world.cells.iter().all(|c| (c.game - 2.0).abs() < 0.05), "herds settle at capacity");
+        // ...and not at all outside the breeding seasons
+        for c in &mut world.cells { c.game = 0.5; }
+        world.update_wildlife(0.0);
+        assert!(world.cells.iter().all(|c| (c.game - 0.5).abs() < 1e-9));
+    }
+
+    #[test]
     fn test_world_creation() {
         let config = WorldConfig {
             width: 10,
@@ -441,6 +602,7 @@ mod tests {
             initial_food_per_fertile: 15,
             food_regen_rate: 0.1,
             materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig::default(),
         };
         let world = World::new(&config);
         assert_eq!(world.cells.len(), 100);
@@ -457,6 +619,7 @@ mod tests {
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
             materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig::default(),
         };
         let world = World::new(&config);
         assert!(world.get(0, 0).is_some());
@@ -473,6 +636,7 @@ mod tests {
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
             materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig::default(),
         };
         let world = World::new(&config);
 

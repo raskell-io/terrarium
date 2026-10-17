@@ -1378,11 +1378,17 @@ impl Engine {
 
                     let hunting_skill = agent.skills.level("hunting");
                     let tool_bonus = agent.physical.tool_bonus_for_skill("hunting");
+                    let pos = (agent.physical.x, agent.physical.y);
 
-                    // Calculate success chance (base 40% + skill + tool)
-                    let success_chance = (0.4 + hunting_skill * 0.3 + tool_bonus * 0.2) * game_availability;
+                    // Finding prey depends on how many animals range nearby: encounters rise with
+                    // density and saturate (Holling's functional response); skill and weapon
+                    // decide whether an encounter becomes a kill
+                    let game = self.world.game_around(pos.0, pos.1);
+                    let encounter = 1.0 - (-HUNT_SEARCH_EFFICIENCY * game).exp();
+                    let success_chance = encounter * (0.4 + hunting_skill * 0.3 + tool_bonus * 0.2).min(1.0);
 
-                    if rand::random::<f64>() < success_chance {
+                    if game >= 1.0 && rand::random::<f64>() < success_chance {
+                        self.world.take_game(pos.0, pos.1);
                         // Successful hunt!
                         let food_gained = (3.0 + hunting_skill * 4.0 + tool_bonus * 2.0).round() as u32;
                         self.agents[agent_idx].add_food(food_gained);
@@ -3889,6 +3895,9 @@ fn is_adjacent(a: &Agent, b: &Agent) -> bool {
     dx <= 1 && dy <= 1
 }
 
+/// How effectively a hunter searches their range: encounter chance = 1 - exp(-a * animals)
+const HUNT_SEARCH_EFFICIENCY: f64 = 0.15;
+
 /// Build progress from one day's work (recipes need 10-30; a skilled builder
 /// finishes a lean-to in a day, a novice in about three)
 fn build_progress(crafting_skill: f64) -> u32 {
@@ -4101,7 +4110,7 @@ mod tests {
     #[test]
     fn test_elders_cannot_conceive() {
         let (mut engine, a, b) = courting_pair("elder");
-        engine.agents[0].physical.age = engine.config.aging.prime_end;
+        engine.agents[0].physical.age = engine.config.aging.max_lifespan * 2 / 3;
         let actions = HashMap::from([(a, Action::Mate { target: b }), (b, Action::Mate { target: a })]);
         engine.resolve_mating(1, &actions).unwrap();
         assert!(!expecting(&engine));

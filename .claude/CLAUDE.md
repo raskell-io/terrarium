@@ -57,7 +57,8 @@ PHYSICAL (hard rules)
 ├── Terrain: Fertile (food) or Barren
 ├── Bodies: hunger, energy, health, position
 ├── Resources: food regenerates slowly
-└── Materials: wood/fiber stands regrow logistically; stone is finite
+├── Materials: wood/fiber stands regrow logistically; stone is finite
+└── Wildlife: herds breed seasonally, wander, and can be hunted out
 
 ECONOMIC (enabled by physical)
 ├── Possession: agents carry inventory

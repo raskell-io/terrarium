@@ -21,6 +21,13 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 # wood_regrowth = 0.1       # Logistic rate: growth = r * W * (1 - W/K)
 # stone_per_barren = 40     # Finite: quarried stone never comes back
 
+# Wild game (defaults shown)
+# [world.wildlife]
+# game_per_fertile = 2.0    # Animals a fertile cell supports
+# game_per_barren = 0.3     # ...and a barren one
+# growth = 0.03             # Logistic breeding rate per day, scaled by season
+# dispersal = 0.1           # Share of each herd that wanders to neighbouring cells daily
+
 [agents]
 count = 10
 starting_food = 10          # Each agent starts with some food

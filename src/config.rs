@@ -142,6 +142,10 @@ pub struct AgingConfig {
     /// Maximum lifespan (certain death)
     #[serde(default = "default_max_lifespan")]
     pub max_lifespan: usize,
+    /// Age at which agents can no longer conceive (default: two thirds of the maximum lifespan,
+    /// as human menopause at ~50 falls about two thirds through a 75-80 year maximum lifespan)
+    #[serde(default)]
+    pub fertility_end: Option<usize>,
     /// Base probability of death per epoch after elderly_start
     #[serde(default = "default_death_probability_rate")]
     pub death_probability_rate: f64,
@@ -158,6 +162,7 @@ impl Default for AgingConfig {
             prime_end: 60,
             elderly_start: 60,
             max_lifespan: 150,
+            fertility_end: None,
             death_probability_rate: 0.02,
             capability_affects_actions: true,
         }
@@ -165,9 +170,10 @@ impl Default for AgingConfig {
 }
 
 impl AgingConfig {
-    /// Fertile from the end of youth to the end of prime (always, if aging is off)
+    /// Fertile from the end of youth until fertility ends (always, if aging is off)
     pub fn is_fertile(&self, age: usize) -> bool {
-        !self.enabled || (self.youth_end..self.prime_end).contains(&age)
+        let end = self.fertility_end.unwrap_or(self.max_lifespan * 2 / 3);
+        !self.enabled || (self.youth_end..end).contains(&age)
     }
 }
 
@@ -321,6 +327,7 @@ impl Default for Config {
                 initial_food_per_fertile: 15,
                 food_regen_rate: 0.1,
                 materials: Default::default(),
+                wildlife: Default::default(),
             },
             agents: AgentsConfig {
                 count: 10,

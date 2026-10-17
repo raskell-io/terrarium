@@ -645,7 +645,7 @@ impl Action {
 
         // Tool-unlocked actions
         if unlocked_actions.contains(&"hunt") {
-            actions.push("HUNT - hunt for food and materials (requires spear or bow)".to_string());
+            actions.push("HUNT - hunt game in the surrounding area for food, hide and bone (requires spear or bow; better where there are animal tracks)".to_string());
         }
         if unlocked_actions.contains(&"fish") {
             actions.push("FISH - fish for food (requires fishing pole)".to_string());
@@ -721,7 +721,7 @@ impl Action {
                 actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>".to_string());
             }
             actions.push("COURT <name> - court someone nearby (builds courtship over time)".to_string());
-            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent, sufficient courtship, and both partners past youth but not yet elderly)".to_string());
+            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent, sufficient courtship, and both partners past youth and not too old)".to_string());
 
             // Show TEACH if agent has teachable skills
             if !teachable_skills.is_empty() {
