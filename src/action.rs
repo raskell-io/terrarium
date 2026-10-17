@@ -23,6 +23,12 @@ pub struct ActionContext {
     pub trespassers: Vec<(Uuid, String)>,
     /// This agent is standing on someone else's territory without permission
     pub is_trespassing: bool,
+    /// This agent's nearest unfinished structure: (x, y, type, percent built)
+    pub unfinished_project: Option<(usize, usize, StructureType, u32)>,
+    /// This agent owns a finished shelter or lean-to somewhere
+    pub owns_home: bool,
+    /// Owner of the unfinished structure on this cell, if it belongs to someone else
+    pub unfinished_here_owner: Option<(Uuid, String)>,
 }
 
 /// Actions an agent can take

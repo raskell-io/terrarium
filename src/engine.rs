@@ -1524,6 +1524,7 @@ impl Engine {
                         let crafting_skill = self.agents[agent_idx].skills.level("crafting");
                         let progress = 1 + (crafting_skill * 5.0).round() as u32;
 
+                        let mut completed = None;
                         if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
                             if let Some(ref mut s) = cell.structure {
                                 let was_complete = s.is_complete();
@@ -1535,6 +1536,7 @@ impl Engine {
                                     (self.agents[agent_idx].physical.energy - 0.15).max(0.0);
 
                                 if !was_complete && s.is_complete() {
+                                    completed = Some(s.structure_type.display_name());
                                     debug!("{} completed building {}", self.agents[agent_idx].name(), s.display_name());
                                     self.agents[agent_idx].memory.remember(Episode::survival(
                                         epoch,
@@ -1543,6 +1545,10 @@ impl Engine {
                                     ));
                                 }
                             }
+                        }
+
+                        if let Some(name) = completed {
+                            self.log_and_track(Event::structure_completed(epoch, structure_owner, pos.0, pos.1, name))?;
                         }
 
                         // If helping someone else's structure, check for HelpBuild debt fulfillment
@@ -2853,6 +2859,20 @@ impl Engine {
             trespassers,
             is_trespassing: territory
                 .is_some_and(|t| t.owner != agent.id && !t.allowed_guests.contains(&agent.id)),
+            unfinished_project: self
+                .world
+                .cells
+                .iter()
+                .filter_map(|c| c.structure.as_ref().map(|s| (c, s)))
+                .filter(|(_, s)| s.owner == agent.id && !s.is_complete())
+                .min_by_key(|(c, _)| c.x.abs_diff(pos.0).max(c.y.abs_diff(pos.1)))
+                .map(|(c, s)| (c.x, c.y, s.structure_type, s.build_progress * 100 / s.build_required.max(1))),
+            owns_home: self.world.cells.iter().filter_map(|c| c.structure.as_ref()).any(|s| {
+                s.owner == agent.id && s.is_complete() && s.structure_type.is_shelter()
+            }),
+            unfinished_here_owner: structure
+                .filter(|s| s.owner != agent.id && !s.is_complete())
+                .map(|s| (s.owner, self.agent_name(s.owner))),
         }
     }
 
@@ -3838,6 +3858,33 @@ mod tests {
         assert!(context.craftable_tools.contains(&ToolType::StoneAxe));
         assert!(context.buildable_structures.contains(&StructureType::LeanTo));
         assert!(context.can_mark_territory);
+    }
+
+    #[test]
+    fn test_unfinished_project_in_context_and_completion_logged() {
+        use crate::structures::{Structure, StructureType};
+        let (mut engine, a, b) = courting_pair("project");
+        let structure = Structure::new(StructureType::LeanTo, a, 10, ToolQuality::Standard, 0);
+        engine.world.get_mut(5, 5).unwrap().structure = Some(structure);
+        engine.agents[0].physical.x = 2;
+
+        let context = engine.action_context(&engine.agents[0]);
+        assert_eq!(context.unfinished_project, Some((5, 5, StructureType::LeanTo, 0)));
+        assert!(!context.owns_home);
+        let context = engine.action_context(&engine.agents[1]);
+        assert_eq!(context.unfinished_here_owner.map(|(id, _)| id), Some(a));
+        assert_eq!(context.buildable_structures, vec![StructureType::LeanTo]);
+
+        // The friend finishes it for the owner
+        let build = HashMap::from([(b, Action::Build { structure_type: StructureType::LeanTo })]);
+        for _ in 0..10 {
+            engine.agents[1].physical.energy = 1.0;
+            engine.resolve_actions(1, build.clone()).unwrap();
+        }
+        assert!(engine.recent_events.iter().any(|e| matches!(e.event_type, crate::observation::EventType::StructureCompleted) && e.agent == Some(a)));
+        let context = engine.action_context(&engine.agents[0]);
+        assert_eq!(context.unfinished_project, None);
+        assert!(context.owns_home);
     }
 
     #[test]

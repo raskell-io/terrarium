@@ -189,6 +189,7 @@ pub enum EventViewType {
     TerritoryLost,
     // Structures
     FarmProduced,
+    StructureCompleted,
     StructureDestroyed,
     // Trade
     TradeProposed,
@@ -747,6 +748,14 @@ impl EventView {
                 (
                     format!("{}'s farm produced {} food", name, amount),
                     EventViewType::FarmProduced,
+                )
+            }
+            EventType::StructureCompleted => {
+                let name = agent_name(event.agent?);
+                let structure_type = event.data.description.as_deref().unwrap_or("structure");
+                (
+                    format!("{} finished building a {}", name, structure_type),
+                    EventViewType::StructureCompleted,
                 )
             }
             EventType::StructureDestroyed => {

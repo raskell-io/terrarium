@@ -169,11 +169,20 @@ impl LlmClient {
             .map(|(_, name)| name.to_string())
             .collect();
 
-        let nearby_desc = if nearby_list.is_empty() {
+        let mut nearby_desc = if nearby_list.is_empty() {
             "No one else is nearby.".to_string()
         } else {
             format!("Nearby: {}", nearby_list.join(", "))
         };
+        if let Some((x, y, structure_type, pct)) = context.unfinished_project {
+            nearby_desc.push_str(&format!(
+                "\nYour unfinished {} at ({}, {}) is {}% built. Stand on it and BUILD to keep working.",
+                structure_type.display_name(), x, y, pct
+            ));
+        }
+        if let Some((_, owner)) = &context.unfinished_here_owner {
+            nearby_desc.push_str(&format!("\n{}'s unfinished structure is here; you could help BUILD it.", owner));
+        }
 
         // Build trade context section
         let mut trade_context = self.build_trade_context(
@@ -599,17 +608,39 @@ fn heuristic_action(
     if context.has_shelter && !context.is_sheltered {
         return Action::EnterShelter;
     }
-    // Keep working on our own unfinished structure here
-    if context.owns_structure && !context.buildable_structures.is_empty() && rng.random::<f64>() < 0.7 {
-        return Action::Build { structure_type: context.buildable_structures[0] };
+    // Finish what we started: work on our project here, or walk back to it when fed and rested
+    if let Some((x, y, structure_type, _)) = context.unfinished_project {
+        let pos = (agent.physical.x, agent.physical.y);
+        if (x, y) == pos {
+            if agent.physical.energy > 0.3 {
+                return Action::Build { structure_type };
+            }
+        } else if agent.physical.hunger < 0.5 && agent.physical.energy > 0.4 && rng.random::<f64>() < 0.8 {
+            if let Some(dir) = crate::action::Direction::toward(pos, (x, y)) {
+                return Action::Move(dir);
+            }
+        }
     }
-    // Conscientious agents start a shelter when they have the materials
-    if agent.identity.personality.conscientiousness > 0.5 && rng.random::<f64>() < 0.3 {
+    // Lend a hand on a friend's unfinished structure
+    if let Some((owner, name)) = &context.unfinished_here_owner {
+        let sentiment = agent.beliefs.social.get(owner).map(|b| b.sentiment).unwrap_or(0.0);
+        if agent.physical.energy > 0.4 && (sentiment > 0.3 || agent.identity.personality.agreeableness > 0.6) && rng.random::<f64>() < 0.5 {
+            debug!("Heuristic: helping {} build", name);
+            return Action::Build { structure_type: context.buildable_structures[0] };
+        }
+    }
+    // Conscientious agents without a project start a shelter, gathering materials for one first
+    if context.unfinished_project.is_none()
+        && !context.owns_home
+        && agent.identity.personality.conscientiousness > 0.5
+        && rng.random::<f64>() < 0.3
+    {
         use crate::structures::StructureType;
         let preferred = [StructureType::Shelter, StructureType::LeanTo];
         if let Some(structure_type) = preferred.iter().find(|s| context.buildable_structures.contains(s)) {
             return Action::Build { structure_type: *structure_type };
         }
+        return Action::GatherMaterials;
     }
     // Craft a tool we don't have yet, preferring ones that unlock new ways to get food
     if rng.random::<f64>() < 0.3 {

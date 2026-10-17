@@ -67,6 +67,7 @@ pub enum EventType {
 
     // Structures
     FarmProduced,
+    StructureCompleted,
     StructureDestroyed,
 
     // Trade
@@ -706,6 +707,21 @@ impl Event {
             target: None,
             data: EventData {
                 amount: Some(amount),
+                territory_x: Some(x),
+                territory_y: Some(y),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn structure_completed(epoch: usize, owner: Uuid, x: usize, y: usize, structure_type: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::StructureCompleted,
+            agent: Some(owner),
+            target: None,
+            data: EventData {
+                description: Some(structure_type.to_string()),
                 territory_x: Some(x),
                 territory_y: Some(y),
                 ..EventData::empty()
