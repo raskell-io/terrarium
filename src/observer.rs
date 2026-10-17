@@ -488,10 +488,11 @@ impl EventView {
             EventType::Attacked => {
                 let name = agent_name(event.agent?);
                 let target_name = agent_name(event.target?);
-                (
-                    format!("{} attacked {}!", name, target_name),
-                    EventViewType::Attack,
-                )
+                let text = match event.data.amount {
+                    Some(n) if n > 0 => format!("{} attacked {} and took {} food!", name, target_name, n),
+                    _ => format!("{} attacked {}!", name, target_name),
+                };
+                (text, EventViewType::Attack)
             }
             EventType::AllyIntervened => {
                 let target_name = agent_name(event.target?);

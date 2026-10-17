@@ -125,7 +125,10 @@ impl Chronicle {
             EventType::Attacked => {
                 let agent = agent_name?;
                 let target = target_name?;
-                Some(format!("**{}** attacked **{}**!", agent, target))
+                match event.data.amount {
+                    Some(n) if n > 0 => Some(format!("**{}** attacked **{}** and took {} food!", agent, target, n)),
+                    _ => Some(format!("**{}** attacked **{}**!", agent, target)),
+                }
             }
             EventType::AllyIntervened => {
                 let target = target_name?;

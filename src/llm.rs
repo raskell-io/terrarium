@@ -576,12 +576,31 @@ fn heuristic_action(
         return Action::Rest;
     }
 
-    // Priority 3: Find food if running low
+    // Priority 3: Hungry, disagreeable agents with no food take it by force when none is in sight,
+    // from whoever nearby they like least (never a friend)
+    if agent.physical.food == 0
+        && agent.physical.hunger > 0.5
+        && local_food.here == 0
+        && local_food.adjacent.is_empty()
+        && agent.identity.personality.agreeableness < 0.4
+    {
+        let sentiment = |id: &uuid::Uuid| agent.beliefs.social.get(id).map(|b| b.sentiment).unwrap_or(0.0);
+        let victim = nearby_agents
+            .iter()
+            .filter(|(id, _)| sentiment(id) < 0.3)
+            .min_by(|(a, _), (b, _)| sentiment(a).partial_cmp(&sentiment(b)).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some((target, name)) = victim {
+            debug!("Heuristic: desperate, attacking {} for food", name);
+            return Action::Attack { target: *target };
+        }
+    }
+
+    // Priority 4: Find food if running low
     if agent.physical.food < 3 {
         return seek_food(agent, local_food, &mut rng);
     }
 
-    // Priority 4: Give food to nearby hungry agent if agreeable
+    // Priority 5: Give food to nearby hungry agent if agreeable
     if agent.identity.personality.agreeableness > 0.7
         && agent.physical.food > 5
         && !nearby_agents.is_empty()
@@ -590,7 +609,7 @@ fn heuristic_action(
         return Action::Give { target, amount: 1 };
     }
 
-    // Priority 5: Gossip if extraverted and have opinions to share
+    // Priority 6: Gossip if extraverted and have opinions to share
     if agent.identity.personality.extraversion > 0.5
         && nearby_agents.len() >= 2
         && rng.random::<f64>() < 0.3  // 30% chance
@@ -631,7 +650,7 @@ fn heuristic_action(
     let ready_to_mate = can_reproduce && agent.physical.food >= 5;
     let rested = agent.physical.energy > 0.4;
 
-    // Priority 6: Accept a mating proposal from someone we don't dislike
+    // Priority 7: Accept a mating proposal from someone we don't dislike
     // (resting first if too tired - proposals stay open for a few days)
     if ready_to_mate {
         let accepted = mate_proposals.iter().find(|(id, _)| {
@@ -646,7 +665,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 7: Propose mating once courtship with a nearby partner is strong
+    // Priority 8: Propose mating once courtship with a nearby partner is strong
     if ready_to_mate {
         let mate_candidate = agent.reproduction.courtship_progress.iter()
             .filter(|(id, score)| {
@@ -660,7 +679,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 8: Court - keep up an existing courtship (ours or one directed at us),
+    // Priority 9: Court - keep up an existing courtship (ours or one directed at us),
     // occasionally start a new one if sociable
     if can_reproduce && !nearby_agents.is_empty() {
         let current_partner = agent.reproduction.courtship_progress.iter()
@@ -692,7 +711,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 9: Teach if skilled and agreeable
+    // Priority 10: Teach if skilled and agreeable
     let teachable = agent.skills.teachable_skills();
     if !teachable.is_empty()
         && !nearby_agents.is_empty()
@@ -707,7 +726,7 @@ fn heuristic_action(
         return Action::Teach { target, skill };
     }
 
-    // Priority 10: Trade if we have materials and could use food (or vice versa)
+    // Priority 11: Trade if we have materials and could use food (or vice versa)
     if !nearby_agents.is_empty() && rng.random::<f64>() < 0.25 {
         // Check if we have excess materials to trade for food
         let total_materials: u32 = agent.physical.materials.values().sum();

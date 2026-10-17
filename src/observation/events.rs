@@ -284,7 +284,8 @@ impl Event {
         }
     }
 
-    pub fn attacked(epoch: usize, agent: Uuid, target: Uuid, damage: f64) -> Self {
+    /// `seized` is the food the attacker took from the target
+    pub fn attacked(epoch: usize, agent: Uuid, target: Uuid, damage: f64, seized: u32) -> Self {
         Self {
             epoch,
             event_type: EventType::Attacked,
@@ -292,6 +293,7 @@ impl Event {
             target: Some(target),
             data: EventData {
                 damage: Some(damage),
+                amount: Some(seized),
                 ..EventData::empty()
             },
         }

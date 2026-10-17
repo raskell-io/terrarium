@@ -871,11 +871,19 @@ impl Engine {
 
                             self.agents[target_idx].take_damage(damage);
 
+                            // Violence is the arbiter of property: the attacker seizes food in
+                            // proportion to how hard the blow landed; a killing blow takes it all
+                            let share = if self.agents[target_idx].is_alive() { (damage * 2.0).min(1.0) } else { 1.0 };
+                            let target_food = self.agents[target_idx].physical.food;
+                            let seized = self.agents[target_idx].remove_food((target_food as f64 * share).round() as u32);
+                            self.agents[agent_idx].add_food(seized);
+
                             self.log_and_track(Event::attacked(
                                 epoch,
                                 agent_id,
                                 target,
                                 damage,
+                                seized,
                             ))?;
 
                             let agent_name = self.agents[agent_idx].name().to_string();
@@ -891,16 +899,24 @@ impl Engine {
                             }
 
                             // Memories
+                            let (attacker_memory, victim_memory) = if seized > 0 {
+                                (
+                                    format!("I attacked {} and took {} food", target_name, seized),
+                                    format!("{} attacked me and took {} of my food!", agent_name, seized),
+                                )
+                            } else {
+                                (format!("I attacked {}", target_name), format!("{} attacked me!", agent_name))
+                            };
                             self.agents[agent_idx].memory.remember(Episode::conflict(
                                 epoch,
-                                &format!("I attacked {}", target_name),
+                                &attacker_memory,
                                 -0.2,
                                 target,
                             ));
 
                             self.agents[target_idx].memory.remember(Episode::conflict(
                                 epoch,
-                                &format!("{} attacked me!", agent_name),
+                                &victim_memory,
                                 -0.8,
                                 agent_id,
                             ));
@@ -3726,6 +3742,20 @@ mod tests {
         engine.resolve_mating(2 + MATE_PROPOSAL_DAYS, &mate(b, a)).unwrap();
         assert!(!expecting(&engine));
         assert!(engine.mate_proposals.contains_key(&b));
+    }
+
+    #[test]
+    fn test_attack_seizes_food() {
+        let (mut engine, a, b) = courting_pair("attack");
+        engine.agents[0].physical.food = 0;
+        engine.agents[1].physical.food = 10;
+
+        engine.resolve_actions(1, HashMap::from([(a, Action::Attack { target: b })])).unwrap();
+
+        // Damage 0.15-0.25 seizes 30-50% of the victim's food
+        let seized = engine.agents[0].physical.food;
+        assert!((3..=5).contains(&seized), "seized {}", seized);
+        assert_eq!(engine.agents[1].physical.food, 10 - seized);
     }
 
     #[test]
