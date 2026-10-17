@@ -119,6 +119,16 @@ storm_days = [1, 2]
 storm_hazard = 0.6          # Extra exposure for anyone unsheltered
 storm_damage = 5            # Durability every structure loses per storm day
 
+# Contagious illness (SIR): close contact spreads it, survivors are immune for a while
+[disease]
+enabled = true
+spontaneous_chance = 0.002  # Daily chance of falling ill on one's own
+transmission = 0.1          # Daily chance of catching it from each sick person within one step
+sick_days = [5, 9]
+health_damage = 0.03        # Health lost per sick day
+energy_drain = 0.05
+immunity_days = 60
+
 [llm]
 provider = "anthropic"
 model = "claude-sonnet-5-5"

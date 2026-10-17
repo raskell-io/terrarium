@@ -24,7 +24,56 @@ pub struct Config {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub trade: TradeConfig,
+    #[serde(default)]
+    pub disease: DiseaseConfig,
 }
+
+/// Contagious illness (SIR dynamics: susceptible, infected, recovered and immune)
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiseaseConfig {
+    /// Whether illness occurs at all
+    #[serde(default)]
+    pub enabled: bool,
+    /// Daily chance a well, non-immune agent falls ill on their own (e.g. from bad water or game)
+    #[serde(default = "default_spontaneous")]
+    pub spontaneous_chance: f64,
+    /// Daily chance of catching it from each sick agent within one step
+    #[serde(default = "default_transmission")]
+    pub transmission: f64,
+    /// How long an illness lasts: (shortest, longest) days
+    #[serde(default = "default_sick_days")]
+    pub sick_days: (usize, usize),
+    /// Health lost per day while sick
+    #[serde(default = "default_sick_damage")]
+    pub health_damage: f64,
+    /// Extra energy lost per day while sick
+    #[serde(default = "default_sick_drain")]
+    pub energy_drain: f64,
+    /// Days of immunity after recovering
+    #[serde(default = "default_immunity_days")]
+    pub immunity_days: usize,
+}
+
+impl Default for DiseaseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            spontaneous_chance: default_spontaneous(),
+            transmission: default_transmission(),
+            sick_days: default_sick_days(),
+            health_damage: default_sick_damage(),
+            energy_drain: default_sick_drain(),
+            immunity_days: default_immunity_days(),
+        }
+    }
+}
+
+fn default_spontaneous() -> f64 { 0.002 }
+fn default_transmission() -> f64 { 0.1 }
+fn default_sick_days() -> (usize, usize) { (5, 9) }
+fn default_sick_damage() -> f64 { 0.03 }
+fn default_sick_drain() -> f64 { 0.05 }
+fn default_immunity_days() -> usize { 60 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MetaConfig {
@@ -356,6 +405,7 @@ impl Default for Config {
             aging: AgingConfig::default(),
             skills: SkillsConfig::default(),
             trade: TradeConfig::default(),
+            disease: DiseaseConfig::default(),
         }
     }
 }

@@ -68,6 +68,8 @@ pub enum EventType {
 
     // World
     WeatherChanged,
+    FellIll,
+    Recovered,
 
     // Structures
     FarmProduced,
@@ -730,6 +732,24 @@ impl Event {
                 ..EventData::empty()
             },
         }
+    }
+
+    /// Someone fell ill, from contact with a sick person or on their own
+    pub fn fell_ill(epoch: usize, agent: Uuid, from_contact: bool) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::FellIll,
+            agent: Some(agent),
+            target: None,
+            data: EventData {
+                description: Some(if from_contact { "caught it from someone nearby" } else { "fell ill" }.to_string()),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn recovered(epoch: usize, agent: Uuid) -> Self {
+        Self { epoch, event_type: EventType::Recovered, agent: Some(agent), target: None, data: EventData::empty() }
     }
 
     pub fn weather_changed(epoch: usize, weather: &str) -> Self {

@@ -177,6 +177,9 @@ impl LlmClient {
                     if n.health < 0.5 {
                         looks.push("injured".to_string());
                     }
+                    if n.sick {
+                        looks.push("looks sick".to_string());
+                    }
                     looks.push(format!("carrying {} food", n.food));
                     if n.relatedness > 0.0 {
                         looks.push("your kin".to_string());

@@ -20,6 +20,8 @@ pub struct Neighbour {
     pub strength: f64,
     /// Genetic relatedness, as far as the agent knows (parents, children, siblings)
     pub relatedness: f64,
+    /// Visibly ill
+    pub sick: bool,
 }
 
 /// Situation-dependent actions an agent can take this epoch, computed by the

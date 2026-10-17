@@ -130,6 +130,14 @@ impl Chronicle {
                     _ => Some(format!("**{}** attacked **{}**!", agent, target)),
                 }
             }
+            EventType::FellIll => {
+                let agent = agent_name?;
+                match event.data.description.as_deref() {
+                    Some("caught it from someone nearby") => Some(format!("**{}** caught an illness from someone nearby.", agent)),
+                    _ => Some(format!("**{}** fell ill.", agent)),
+                }
+            }
+            EventType::Recovered => Some(format!("**{}** recovered.", agent_name?)),
             EventType::WeatherChanged => {
                 let weather = event.data.description.as_deref().unwrap_or("fair");
                 Some(format!("*The weather turned: {}.*", weather))

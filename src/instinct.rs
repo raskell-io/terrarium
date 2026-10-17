@@ -673,7 +673,7 @@ mod tests {
         agent.physical.health = 0.6;
         let rich = Neighbour {
             id: Uuid::new_v4(), name: "Rich".into(), x: 5, y: 6,
-            health: 0.9, hunger: 0.2, food: 12, strength: 0.9, relatedness,
+            health: 0.9, hunger: 0.2, food: 12, strength: 0.9, relatedness, sick: false,
         };
         agent.beliefs.update_trust(rich.id, "Rich", trust, 0);
         let context = ActionContext { strength: 0.6, neighbours: vec![rich], ..Default::default() };
@@ -693,7 +693,7 @@ mod tests {
         agent.physical.hunger = 0.2;
         let hungry = Neighbour {
             id: Uuid::new_v4(), name: "Hungry".into(), x: 5, y: 6,
-            health: 0.6, hunger: 0.75, food: 0, strength: 0.6, relatedness: 0.0,
+            health: 0.6, hunger: 0.75, food: 0, strength: 0.6, relatedness: 0.0, sick: false,
         };
         let context = ActionContext { strength: 1.0, neighbours: vec![hungry], ..Default::default() };
         let action = decide(&agent, &LocalFood::default(), &context, &[], &[], &[], 1);
@@ -707,7 +707,7 @@ mod tests {
         agent.physical.hunger = 0.3;
         let partner = Neighbour {
             id: Uuid::new_v4(), name: "Partner".into(), x: 5, y: 5,
-            health: 1.0, hunger: 0.3, food: 6, strength: 1.0, relatedness: 0.0,
+            health: 1.0, hunger: 0.3, food: 6, strength: 1.0, relatedness: 0.0, sick: false,
         };
         agent.reproduction.courtship_progress.insert(partner.id, 0.8);
         let context = ActionContext {

@@ -233,6 +233,12 @@ pub struct PhysicalState {
     /// Currently sheltered at position (x, y) - None if not sheltered
     #[serde(default)]
     pub sheltered_at: Option<(usize, usize)>,
+    /// Days left of an infectious illness (0 = well)
+    #[serde(default)]
+    pub sick_days: usize,
+    /// Immune to illness until this epoch (after recovering)
+    #[serde(default)]
+    pub immune_until: usize,
 }
 
 impl PhysicalState {
@@ -409,6 +415,8 @@ impl Agent {
                 materials: HashMap::new(),
                 tools: Vec::new(),
                 sheltered_at: None,
+                sick_days: 0,
+                immune_until: 0,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState::default(),
@@ -450,6 +458,8 @@ impl Agent {
                 materials: HashMap::new(),
                 tools: Vec::new(),
                 sheltered_at: None,
+                sick_days: 0,
+                immune_until: 0,
             },
             active_goal: Some(Goal::Explore),
             reproduction: ReproductionState {
@@ -620,10 +630,13 @@ impl Agent {
             _ => format!("You are {} days old", self.physical.age),
         };
 
-        let physical = format!(
+        let mut physical = format!(
             "Physical state: {}. You are {}, {}, and {}. You carry {} food (carried food slowly spoils; food in storage keeps).",
             age_desc, health_desc, hunger_desc, energy_desc, self.physical.food
         );
+        if self.physical.sick_days > 0 {
+            physical.push_str(" You are sick with a fever, and those near you may catch it.");
+        }
 
         let goal = match &self.active_goal {
             Some(g) => format!("Current focus: {}", g.describe()),

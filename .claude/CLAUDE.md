@@ -59,7 +59,8 @@ PHYSICAL (hard rules)
 ├── Resources: food regenerates slowly
 ├── Materials: wood/fiber stands regrow logistically; stone is finite
 ├── Wildlife: herds breed seasonally, wander, and can be hunted out
-└── Weather: random droughts and storms on top of the seasons (opt-in)
+├── Weather: random droughts and storms on top of the seasons (opt-in)
+└── Disease: contagion between neighbours, recovery with immunity (opt-in)
 
 ECONOMIC (enabled by physical)
 ├── Possession: agents carry inventory

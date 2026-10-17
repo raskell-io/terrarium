@@ -407,6 +407,9 @@ impl Engine {
             self.log_and_track(event)?;
         }
 
+        // 2b. Illness spreads between people who are close
+        self.tick_disease(epoch)?;
+
         // 3. Perception and deliberation (collect actions)
         let mut actions: HashMap<Uuid, Action> = HashMap::new();
 
@@ -3050,6 +3053,7 @@ impl Engine {
                     food: a.physical.food,
                     strength: a.physical.health * a.age_modifier(&self.config.aging),
                     relatedness: relatedness(agent, a),
+                    sick: a.physical.sick_days > 0,
                 })
                 .collect(),
             strength: agent.physical.health * agent.age_modifier(&self.config.aging),
@@ -3438,6 +3442,59 @@ impl Engine {
     }
 
     /// Decay structures each epoch and remove destroyed ones
+    /// Contagion (SIR): the sick lose health and energy until they recover with immunity; the
+    /// well catch it from each sick person within one step, or rarely on their own
+    fn tick_disease(&mut self, epoch: usize) -> Result<()> {
+        let config = self.config.disease.clone();
+        if !config.enabled {
+            return Ok(());
+        }
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        // Who is infectious today (as of the start of the day)
+        let sick: Vec<(usize, usize, Uuid)> = self
+            .agents
+            .iter()
+            .filter(|a| a.is_alive() && a.physical.sick_days > 0)
+            .map(|a| (a.physical.x, a.physical.y, a.id))
+            .collect();
+        let mut events = Vec::new();
+        for agent in self.agents.iter_mut().filter(|a| a.is_alive()) {
+            let p = &mut agent.physical;
+            if p.sick_days > 0 {
+                p.health -= config.health_damage;
+                p.energy = (p.energy - config.energy_drain).max(0.0);
+                p.sick_days -= 1;
+                if !agent.is_alive() {
+                    events.push(Event::died(epoch, agent.id, "illness"));
+                } else if agent.physical.sick_days == 0 {
+                    agent.physical.immune_until = epoch + config.immunity_days;
+                    agent.memory.remember(Episode::survival(epoch, "I recovered from my illness", 0.5));
+                    events.push(Event::recovered(epoch, agent.id));
+                }
+                continue;
+            }
+            if epoch < p.immune_until {
+                continue;
+            }
+            let contacts = sick
+                .iter()
+                .filter(|(x, y, id)| *id != agent.id && x.abs_diff(p.x) <= 1 && y.abs_diff(p.y) <= 1)
+                .count();
+            let escape = (1.0 - config.transmission).powi(contacts as i32) * (1.0 - config.spontaneous_chance);
+            if rng.random::<f64>() >= escape {
+                let (lo, hi) = config.sick_days;
+                p.sick_days = rng.random_range(lo.max(1)..=hi.max(lo.max(1)));
+                agent.memory.remember(Episode::survival(epoch, "I fell ill", -0.6));
+                events.push(Event::fell_ill(epoch, agent.id, contacts > 0));
+            }
+        }
+        for event in events {
+            self.log_and_track(event)?;
+        }
+        Ok(())
+    }
+
     /// Storms batter every structure; ones worn down to nothing are destroyed
     fn storm_damage(&mut self, epoch: usize) -> Result<()> {
         let damage = self.environment.weather.storm_damage;
@@ -4226,6 +4283,39 @@ mod tests {
         assert_eq!(engine.world.get(5, 5).unwrap().structure.as_ref().unwrap().durability, 2);
         engine.storm_damage(2).unwrap();
         assert!(engine.world.get(5, 5).unwrap().structure.is_none(), "worn-out structures are destroyed");
+    }
+
+    #[test]
+    fn test_illness_spreads_to_neighbours_and_leaves_immunity() {
+        let (mut engine, _, _) = courting_pair("illness");
+        engine.config.disease = crate::config::DiseaseConfig {
+            enabled: true,
+            spontaneous_chance: 0.0,
+            transmission: 1.0,
+            sick_days: (3, 3),
+            ..Default::default()
+        };
+        engine.agents[0].physical.sick_days = 3;
+        engine.tick_disease(1).unwrap();
+        assert_eq!(engine.agents[1].physical.sick_days, 3, "caught it from the neighbour");
+        assert_eq!(engine.agents[0].physical.sick_days, 2);
+        assert!(engine.agents[0].physical.health < 1.0);
+
+        engine.tick_disease(2).unwrap();
+        engine.tick_disease(3).unwrap();
+        assert_eq!(engine.agents[0].physical.sick_days, 0, "recovered");
+        assert!(engine.agents[0].physical.immune_until > 3);
+        engine.tick_disease(4).unwrap();
+        engine.tick_disease(5).unwrap();
+        assert_eq!(engine.agents[0].physical.sick_days, 0, "immune to re-infection");
+
+        // Distance protects
+        let (mut engine, _, _) = courting_pair("illness-apart");
+        engine.config.disease = crate::config::DiseaseConfig { enabled: true, spontaneous_chance: 0.0, transmission: 1.0, ..Default::default() };
+        engine.agents[0].physical.sick_days = 5;
+        engine.agents[1].physical.x = 8;
+        engine.tick_disease(1).unwrap();
+        assert_eq!(engine.agents[1].physical.sick_days, 0);
     }
 
     #[test]
