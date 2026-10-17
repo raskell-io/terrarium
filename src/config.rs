@@ -88,7 +88,8 @@ pub struct AgentsConfig {
     pub starting_food: u32,
     #[serde(default = "default_personality")]
     pub personality: String,
-    /// Age of founding agents in epochs (default: end of youth, so founders start in prime)
+    /// Age of every founding agent in epochs (default: a mix of adult ages, from the end of
+    /// youth to the end of prime, so generations overlap)
     #[serde(default)]
     pub starting_age: Option<usize>,
     /// Fraction of carried food that spoils each epoch (food in storage keeps)
@@ -211,9 +212,9 @@ impl Default for AgingConfig {
         Self {
             enabled: true,
             youth_end: 15,
-            prime_end: 60,
-            elderly_start: 60,
-            max_lifespan: 150,
+            prime_end: 200,
+            elderly_start: 240,
+            max_lifespan: 400,
             fertility_end: None,
             death_probability_rate: 0.02,
             capability_affects_actions: true,
@@ -231,9 +232,11 @@ impl AgingConfig {
 
 fn default_aging_enabled() -> bool { true }
 fn default_youth_end() -> usize { 15 }
-fn default_prime_end() -> usize { 60 }
-fn default_elderly_start() -> usize { 60 }
-fn default_max_lifespan() -> usize { 150 }
+// A life of about four 100-day years, in roughly human proportions: childhood to day 15,
+// prime to day 200, old age (rising mortality) from day 240, none past day 400
+fn default_prime_end() -> usize { 200 }
+fn default_elderly_start() -> usize { 240 }
+fn default_max_lifespan() -> usize { 400 }
 fn default_death_probability_rate() -> f64 { 0.02 }
 fn default_capability_affects_actions() -> bool { true }
 

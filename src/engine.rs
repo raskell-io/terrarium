@@ -65,7 +65,11 @@ impl Engine {
         // Create agents
         let names = generate_names(config.agents.count);
         let mut agents = Vec::with_capacity(config.agents.count);
-        let starting_age = config.agents.starting_age.unwrap_or(config.aging.youth_end);
+        // Founders are adults of mixed ages, as in any real band, unless the scenario fixes one
+        // age; a single shared age would make the whole founding generation die out together
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let adult_ages = config.aging.youth_end..=config.aging.prime_end.max(config.aging.youth_end);
 
         // Scatter founders evenly across the world on a lattice, each on the nearest land
         let (w, h) = (config.world.width, config.world.height);
@@ -78,7 +82,7 @@ impl Engine {
             let y = ((row as f64 + 0.5) * h as f64 / rows as f64) as usize;
             let (x, y) = world.nearest_land(x.min(w - 1), y.min(h - 1));
             let mut agent = Agent::new(name, x, y, config.agents.starting_food);
-            agent.physical.age = starting_age;
+            agent.physical.age = config.agents.starting_age.unwrap_or_else(|| rng.random_range(adult_ages.clone()));
             agents.push(agent);
         }
 
@@ -4295,6 +4299,10 @@ mod tests {
     #[test]
     fn test_seeing_an_emptied_patch_corrects_the_belief() {
         let (mut engine, _, _) = courting_pair("belief");
+        // Open, level ground, so the view is the normal two cells (forest would shorten it)
+        let here = engine.world.get_mut(5, 5).unwrap();
+        here.wood = 0;
+        here.elevation = 0.5;
         engine.agents[0].beliefs.update_food_belief(6, 7, 9, 0);
         engine.world.get_mut(6, 7).unwrap().food = 0;
         engine.world.get_mut(3, 3).unwrap().food = 8;

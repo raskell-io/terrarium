@@ -39,7 +39,7 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 [agents]
 count = 10
 starting_food = 10          # Each agent starts with some food
-# starting_age = 15        # Founders' age in days (default: end of youth, i.e. prime)
+# starting_age = 15        # Give every founder this age in days (default: mixed adult ages)
 # food_spoilage = 0.05      # Fraction of carried food that rots each day (stored food keeps)
 # view_radius = 2           # How many cells away agents can see (interaction needs adjacency)
 personality = "random"      # Randomize Big Five traits
