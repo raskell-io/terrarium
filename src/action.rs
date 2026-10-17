@@ -551,7 +551,7 @@ impl Action {
             "WAIT - do nothing, recover energy".to_string(),
             "MOVE <direction> - move (north/south/east/west/ne/nw/se/sw)".to_string(),
             "GATHER - collect food from current location".to_string(),
-            "EAT - eat food from your inventory".to_string(),
+            "EAT - eat a meal from your inventory (as much as you need to feel full)".to_string(),
             "REST - rest to recover energy".to_string(),
             "GATHER_MATERIALS - collect wood, stone, fiber, or flint from the terrain".to_string(),
         ];

@@ -235,13 +235,16 @@ impl Event {
         }
     }
 
-    pub fn ate(epoch: usize, agent: Uuid) -> Self {
+    pub fn ate(epoch: usize, agent: Uuid, amount: u32) -> Self {
         Self {
             epoch,
             event_type: EventType::Ate,
             agent: Some(agent),
             target: None,
-            data: EventData::empty(),
+            data: EventData {
+                amount: Some(amount),
+                ..EventData::empty()
+            },
         }
     }
 

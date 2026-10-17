@@ -533,21 +533,22 @@ impl Agent {
         self.physical.energy = (self.physical.energy - 0.05).max(0.0);
     }
 
-    /// Eat food from inventory
-    pub fn eat(&mut self) -> bool {
-        if self.physical.food > 0 {
+    /// Eat a meal from inventory: at least one food, then more while still
+    /// hungry enough that it won't be wasted. Returns the amount eaten.
+    pub fn eat(&mut self) -> u32 {
+        let mut eaten = 0;
+        while self.physical.food > 0 && (eaten == 0 || self.physical.hunger >= 0.3) {
             self.physical.food -= 1;
             self.physical.hunger = (self.physical.hunger - 0.3).max(0.0);
             self.physical.health = (self.physical.health + 0.05).min(1.0);
-            true
-        } else {
-            false
+            eaten += 1;
         }
+        eaten
     }
 
     /// Rest to recover energy
     pub fn rest(&mut self) {
-        self.physical.energy = (self.physical.energy + 0.3).min(1.0);
+        self.physical.energy = (self.physical.energy + 0.5).min(1.0);
     }
 
     /// Take damage
@@ -802,4 +803,24 @@ pub fn generate_offspring_name(parent_a_name: &str, parent_b_name: &str, existin
     }
 
     blended
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eat_until_full_without_waste() {
+        let mut agent = Agent::new("Test".to_string(), 0, 0, 10);
+        agent.physical.hunger = 0.7;
+        assert_eq!(agent.eat(), 2); // 0.7 -> 0.4 -> 0.1, stops before wasting a third
+        assert!((agent.physical.hunger - 0.1).abs() < 1e-9);
+        assert_eq!(agent.physical.food, 8);
+
+        // Always eats at least one when choosing to eat
+        assert_eq!(agent.eat(), 1);
+
+        agent.physical.food = 0;
+        assert_eq!(agent.eat(), 0);
+    }
 }

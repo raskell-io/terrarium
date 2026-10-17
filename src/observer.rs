@@ -457,7 +457,11 @@ impl EventView {
             }
             EventType::Ate => {
                 let name = agent_name(event.agent?);
-                (format!("{} ate", name), EventViewType::Eating)
+                let text = match event.data.amount {
+                    Some(n) if n > 1 => format!("{} ate {} food", name, n),
+                    _ => format!("{} ate", name),
+                };
+                (text, EventViewType::Eating)
             }
             EventType::Rested => {
                 let name = agent_name(event.agent?);

@@ -663,9 +663,9 @@ impl Engine {
                 }
 
                 Action::Eat => {
-                    let ate = self.agents[agent_idx].eat();
-                    if ate {
-                        self.log_and_track(Event::ate(epoch, agent_id))?;
+                    let eaten = self.agents[agent_idx].eat();
+                    if eaten > 0 {
+                        self.log_and_track(Event::ate(epoch, agent_id, eaten))?;
 
                         self.agents[agent_idx].memory.remember(Episode::survival(
                             epoch,
@@ -711,7 +711,7 @@ impl Engine {
                         0.0
                     };
 
-                    let recovery = (0.3 + shelter_bonus + territory_bonus) * age_mod;
+                    let recovery = (0.5 + shelter_bonus + territory_bonus) * age_mod;
                     self.agents[agent_idx].physical.energy =
                         (self.agents[agent_idx].physical.energy + recovery).min(1.0);
                     self.log_and_track(Event::rested(epoch, agent_id))?;
