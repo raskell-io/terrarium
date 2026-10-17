@@ -3,25 +3,10 @@ use clap::Parser;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-mod action;
-mod agent;
-mod config;
-mod crafting;
-mod engine;
-mod environment;
-mod groups;
-mod instinct;
-mod llm;
-mod observation;
-mod observer;
-mod structures;
-mod trade;
-mod tui;
-mod world;
-
-use config::Config;
-use engine::Engine;
-use environment::EnvironmentConfig;
+use terrarium::config::Config;
+use terrarium::engine::Engine;
+use terrarium::environment::EnvironmentConfig;
+use terrarium::tui;
 
 #[derive(Parser, Debug)]
 #[command(name = "terrarium")]

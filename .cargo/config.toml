@@ -1,0 +1,3 @@
+# The browser build gets randomness from the browser's crypto API
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

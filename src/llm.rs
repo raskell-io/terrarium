@@ -23,6 +23,7 @@ pub struct LlmConfig {
 
 /// LLM client for agent deliberation
 pub struct LlmClient {
+    #[cfg(feature = "native")]
     client: reqwest::Client,
     config: LlmConfig,
     api_key: Option<String>,
@@ -71,7 +72,8 @@ struct ContentBlock {
 impl LlmClient {
     /// Create a new LLM client
     pub fn new(config: LlmConfig) -> Self {
-        let api_key = std::env::var(&config.api_key_env).ok();
+        // Only native builds read a key; the browser build always acts on instinct
+        let api_key = if cfg!(feature = "native") { std::env::var(&config.api_key_env).ok() } else { None };
 
         if api_key.is_none() {
             warn!(
@@ -81,6 +83,7 @@ impl LlmClient {
         }
 
         Self {
+            #[cfg(feature = "native")]
             client: reqwest::Client::new(),
             config,
             api_key,
@@ -369,6 +372,12 @@ ACTION: GATHER"#,
         sections.join("")
     }
 
+    #[cfg(not(feature = "native"))]
+    async fn call_api(&self, _prompt: &str) -> Result<String> {
+        Err(anyhow!("This build has no LLM client"))
+    }
+
+    #[cfg(feature = "native")]
     async fn call_api(&self, prompt: &str) -> Result<String> {
         let api_key = self
             .api_key

@@ -10,9 +10,10 @@ use crate::world::World;
 
 /// Generates human-readable chronicle from events
 pub struct Chronicle {
-    output_dir: PathBuf,
-    events_file: BufWriter<File>,
-    chronicle_file: BufWriter<File>,
+    /// Where snapshots go; None keeps everything in memory (the browser build)
+    output_dir: Option<PathBuf>,
+    events_file: Box<dyn Write>,
+    chronicle_file: Box<dyn Write>,
     agent_names: HashMap<Uuid, String>,
 }
 
@@ -28,11 +29,21 @@ impl Chronicle {
         let chronicle_file = BufWriter::new(File::create(chronicle_path)?);
 
         Ok(Self {
-            output_dir: output_path,
-            events_file,
-            chronicle_file,
+            output_dir: Some(output_path),
+            events_file: Box::new(events_file),
+            chronicle_file: Box::new(chronicle_file),
             agent_names: HashMap::new(),
         })
+    }
+
+    /// A chronicle that writes nothing to disk
+    pub fn in_memory() -> Self {
+        Self {
+            output_dir: None,
+            events_file: Box::new(std::io::sink()),
+            chronicle_file: Box::new(std::io::sink()),
+            agent_names: HashMap::new(),
+        }
     }
 
     /// Register agent names for narrative generation
@@ -244,7 +255,10 @@ impl Chronicle {
 
     /// Save a state snapshot
     pub fn save_snapshot(&self, epoch: usize, world: &World, agents: &[Agent]) -> anyhow::Result<()> {
-        let states_dir = self.output_dir.join("states");
+        let Some(output_dir) = &self.output_dir else {
+            return Ok(());
+        };
+        let states_dir = output_dir.join("states");
         fs::create_dir_all(&states_dir)?;
 
         let snapshot = Snapshot { epoch, world: world.clone(), agents: agents.to_vec() };

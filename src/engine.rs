@@ -46,8 +46,19 @@ pub struct Engine {
 const MATE_PROPOSAL_DAYS: usize = 3;
 
 impl Engine {
-    /// Create a new simulation engine
+    /// Create a new simulation engine that writes its event log, chronicle and snapshots to
+    /// `output_dir`
     pub fn new(config: Config, output_dir: &str) -> Result<Self> {
+        Self::with_chronicle(config, Chronicle::new(output_dir)?)
+    }
+
+    /// Create a simulation engine that keeps everything in memory (no files), for clients
+    /// such as the browser that read the world through the observer interface
+    pub fn in_memory(config: Config) -> Result<Self> {
+        Self::with_chronicle(config, Chronicle::in_memory())
+    }
+
+    fn with_chronicle(config: Config, chronicle: Chronicle) -> Result<Self> {
         // Create world
         let world = World::new(&config.world);
 
@@ -75,7 +86,7 @@ impl Engine {
         let llm = LlmClient::new(config.llm.clone());
 
         // Create chronicle
-        let mut chronicle = Chronicle::new(output_dir)?;
+        let mut chronicle = chronicle;
         chronicle.register_agents(&agents);
 
         // Get environment config (use from config or default to earth temperate)
@@ -105,6 +116,26 @@ impl Engine {
     }
 
     // ==================== Observer Interface ====================
+
+    /// The scenario configuration this run was created from
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    /// The world as it is (read-only), for clients that render it themselves
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    /// Events from the last few epochs (read-only)
+    pub fn recent_events(&self) -> &[Event] {
+        &self.recent_events
+    }
+
+    /// Everyone who has lived, alive or not (read-only)
+    pub fn agents(&self) -> &[Agent] {
+        &self.agents
+    }
 
     /// Get a view of the current world state
     pub fn world_view(&self) -> WorldView {
@@ -595,8 +626,6 @@ impl Engine {
         // Get environment state for movement cost
         let env_state = self.conditions(epoch);
         let base_movement_cost = 0.05 * env_state.movement_cost;
-        // Game and fish follow the seasons like plants do (scarce in winter)
-        let game_availability = env_state.food_regen_modifier.min(1.0);
         let aging_config = self.config.aging.clone();
 
         // Collect gather actions per cell for splitting
