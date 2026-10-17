@@ -570,8 +570,12 @@ impl Engine {
             }
         }
 
-        // Second pass: resolve actions
-        for (agent_id, action) in actions {
+        // Second pass: resolve actions. Everyone acts from where they stood at the start of the
+        // day, so leaving (moving or backing down) happens after every interaction: walking away
+        // doesn't dodge an attack, gift or theft made the same day
+        let mut ordered: Vec<(Uuid, Action)> = actions.into_iter().collect();
+        ordered.sort_by_key(|(_, action)| matches!(action, Action::Move(_) | Action::Submit));
+        for (agent_id, action) in ordered {
             let agent_idx = self.agents.iter().position(|a| a.id == agent_id);
             if agent_idx.is_none() {
                 continue;
@@ -4024,6 +4028,19 @@ mod tests {
         assert!(engine.recent_events.iter().any(|e| matches!(e.event_type, crate::observation::EventType::Raided)));
         // Unseen, the owner can't tell who did it
         assert!(engine.agents[0].beliefs.social.get(&b).is_none_or(|s| s.trust >= 0.0));
+    }
+
+    #[test]
+    fn test_moving_away_does_not_dodge_a_same_day_attack() {
+        let (mut engine, a, b) = courting_pair("dodge");
+        for _ in 0..20 {
+            engine.agents[1].physical.x = 5;
+            engine.agents[1].physical.health = 1.0;
+            let actions = HashMap::from([(a, Action::Attack { target: b }), (b, Action::Move(Direction::East))]);
+            engine.resolve_actions(1, actions).unwrap();
+            assert!(engine.agents[1].physical.health < 1.0, "the attack must land before the move");
+            assert_eq!(engine.agents[1].physical.x, 6);
+        }
     }
 
     #[test]
