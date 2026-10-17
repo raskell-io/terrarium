@@ -67,7 +67,7 @@ pub fn draw(frame: &mut Frame, engine: &Engine, app: &mut App) {
 
     // Draw help overlay if active
     if app.show_help {
-        draw_help(frame);
+        draw_help(frame, app);
     }
 }
 
@@ -161,12 +161,12 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
         Span::raw(": Help"),
         Span::raw("  "),
         Span::styled(status, status_style),
-        Span::raw(format!(
-            "  Day {} / {}  Alive: {}  ",
-            engine.epoch(),
-            engine.total_epochs(),
-            engine.alive_count(),
-        )),
+        // Open-ended runs (the browser) have no last day worth showing
+        Span::raw(if engine.total_epochs() > 100_000 {
+            format!("  Day {}  Alive: {}  ", engine.epoch(), engine.alive_count())
+        } else {
+            format!("  Day {} / {}  Alive: {}  ", engine.epoch(), engine.total_epochs(), engine.alive_count())
+        }),
         Span::styled(
             format!("{}", env_state.current_phase),
             phase_style,
@@ -184,20 +184,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 }
 
 /// Draw the help overlay
-fn draw_help(frame: &mut Frame) {
+fn draw_help(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // Center the help popup
-    let popup_width = 60;
-    let popup_height = 22;
-    let x = (area.width.saturating_sub(popup_width)) / 2;
-    let y = (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(x, y, popup_width, popup_height);
-
-    // Clear background
-    frame.render_widget(Clear, popup_area);
-
-    let help_text = vec![
+    let mut help_text = vec![
         Line::from(Span::styled(
             "TERRARIUM - Keybindings",
             Style::default()
@@ -233,9 +223,28 @@ fn draw_help(frame: &mut Frame) {
         Line::from("  F           Toggle full agent details"),
         Line::from("  PageUp/Down Scroll events"),
         Line::from(""),
-        Line::from("  Q           Quit"),
-        Line::from("  ?           Toggle this help"),
     ];
+    if !app.client_keys.is_empty() {
+        help_text.push(Line::from(Span::styled("World", Style::default().add_modifier(Modifier::UNDERLINED))));
+        for (key, what) in &app.client_keys {
+            help_text.push(Line::from(format!("  {:<12}{}", key, what)));
+        }
+        help_text.push(Line::from(""));
+    }
+    if app.can_quit {
+        help_text.push(Line::from("  Q           Quit"));
+    }
+    help_text.push(Line::from("  ?           Toggle this help"));
+
+    // Center the help popup, sized to its contents
+    let popup_width = 60.min(area.width);
+    let popup_height = (help_text.len() as u16 + 2).min(area.height);
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    // Clear background
+    frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .title(" Help ")

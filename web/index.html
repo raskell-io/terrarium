@@ -4,106 +4,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Terrarium</title>
-  <meta name="description" content="A world simulation where people forage, share, quarrel, build and raise families. Runs entirely in your browser.">
+  <meta name="description" content="Terrarium's terminal viewer in the browser: a world simulation where people forage, share, quarrel, build and raise families.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=Pixelify+Sans:wght@400;600;700&family=Alegreya+Sans:wght@400;500;700&display=swap">
-  <link rel="stylesheet" href="css/site.css">
-  <link rel="stylesheet" href="css/classic.css">
-  <link rel="stylesheet" href="css/premium.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,700;1,400&display=swap">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #1e1e1e;
+      color: #e6e6e6;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    /* Ratzilla renders the terminal as a grid of preformatted rows */
+    pre {
+      margin: 0;
+      font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+      font-size: 16px;
+      line-height: 1.15;
+    }
+    .loading {
+      font: 16px "JetBrains Mono", Menlo, Consolas, monospace;
+      color: #9a9a9a;
+    }
+  </style>
 </head>
-<body data-look="classic">
-
-  <!-- Title screen -->
-  <main id="title" class="screen title-screen">
-    <div class="title-inner">
-      <pre class="logo-ascii" aria-hidden="true">
- ▀█▀ █▀▀ █▀█ █▀█ ▄▀█ █▀█ █ █ █ █▀▄▀█
-  █  ██▄ █▀▄ █▀▄ █▀█ █▀▄ █ █▄█ █ ▀ █</pre>
-      <h1 class="logo-text">Terrarium</h1>
-      <p class="tagline">A small world, and the people who try to live in it. They forage, share, quarrel, build, fall ill and raise children. You watch.</p>
-
-      <section class="panel embark" aria-labelledby="pick-heading">
-        <h2 id="pick-heading">Choose a world</h2>
-        <ul class="scenarios" id="scenarios" role="listbox" aria-label="Scenarios"></ul>
-
-        <div class="look-pick" role="radiogroup" aria-label="Look">
-          <span class="label">Look</span>
-          <button class="look-option" data-look="classic" role="radio" aria-checked="true">Classic</button>
-          <button class="look-option" data-look="premium" role="radio" aria-checked="false">Premium</button>
-        </div>
-
-        <button class="embark-button" id="embark">Embark</button>
-        <p class="status" id="boot-status">Loading the world engine…</p>
-      </section>
-
-      <section class="about">
-        <div>
-          <h3>What happens</h3>
-          <p>Every day each person looks around, weighs hunger, kin, friends and grudges, and acts: gather, eat, rest, share food, court, build a shelter, claim land, or take what they need. Seasons turn, droughts and storms come without warning, illness spreads between neighbours.</p>
-        </div>
-        <div>
-          <h3>How it runs</h3>
-          <p>The simulation engine is written in Rust and compiled to WebAssembly; it runs entirely on this page. Without a language model, people act on instinct: rules taken from behavioural ecology rather than a script.</p>
-        </div>
-        <div>
-          <h3>Controls</h3>
-          <p><kbd>Space</kbd> pause · <kbd>.</kbd> one day · <kbd>1</kbd>–<kbd>3</kbd> speed · <kbd>L</kbd> switch look · <kbd>+</kbd>/<kbd>−</kbd> zoom · click a person to follow them.</p>
-        </div>
-      </section>
-      <footer class="credits"><a href="https://github.com/raskell-io/terrarium">Source on GitHub</a></footer>
-    </div>
-  </main>
-
-  <!-- Game screen -->
-  <div id="game" class="screen game-screen" hidden>
-    <header class="topbar">
-      <button class="brand" id="to-title" title="Back to the title screen">Terrarium</button>
-      <div class="when">
-        <span class="world-name" id="world-name"></span>
-        <span class="date" id="date"></span>
-        <span class="weather" id="weather"></span>
-      </div>
-      <div class="speed" role="group" aria-label="Speed">
-        <button id="pause" class="key" title="Pause (Space)">❚❚</button>
-        <button class="key speed-btn" data-speed="1" title="Slow (1)">▶</button>
-        <button class="key speed-btn" data-speed="4" title="Normal (2)">▶▶</button>
-        <button class="key speed-btn" data-speed="15" title="Fast (3)">▶▶▶</button>
-        <button id="step" class="key" title="One day (.)">+1</button>
-      </div>
-      <div class="view-controls">
-        <button id="zoom-out" class="key" title="Zoom out (−)">−</button>
-        <button id="zoom-in" class="key" title="Zoom in (+)">+</button>
-        <button id="look-toggle" class="key" title="Switch look (L)">Look</button>
-      </div>
-    </header>
-
-    <div class="playfield">
-      <section class="map-pane panel" aria-label="Map">
-        <div class="map-scroll" id="map-scroll">
-          <canvas id="map"></canvas>
-        </div>
-        <div class="hover-info" id="hover-info" aria-live="polite"></div>
-      </section>
-
-      <aside class="side">
-        <section class="panel selected" aria-labelledby="sel-heading">
-          <h2 id="sel-heading">Selected</h2>
-          <div id="selected" class="selected-body"></div>
-        </section>
-        <section class="panel units" aria-labelledby="units-heading">
-          <h2 id="units-heading">People <span id="pop-count"></span></h2>
-          <ul id="units" class="unit-list"></ul>
-        </section>
-      </aside>
-    </div>
-
-    <section class="panel announcements" aria-labelledby="log-heading">
-      <h2 id="log-heading">Announcements</h2>
-      <ol id="log" class="log" aria-live="polite"></ol>
-    </section>
-  </div>
-
-  <script type="module" src="js/main.js"></script>
+<body>
+  <noscript>Terrarium runs in your browser and needs JavaScript and WebAssembly.</noscript>
+  <script type="module">
+    import init from "./pkg/terrarium_web.js";
+    init().catch((e) => {
+      document.body.textContent = "Terrarium could not start: " + e;
+      document.body.className = "loading";
+    });
+  </script>
 </body>
 </html>

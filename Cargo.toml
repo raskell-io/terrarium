@@ -8,15 +8,17 @@ license = "MIT"
 repository = "https://github.com/raskell-io/terrarium"
 
 [workspace]
-members = [".", "web/engine"]
+members = [".", "web"]
 
 [lib]
 path = "src/lib.rs"
 
 [features]
 default = ["native"]
-# The CLI, terminal UI, file output and Claude API client; off for the browser build
-native = ["dep:tokio", "dep:reqwest", "dep:clap", "dep:tracing-subscriber", "dep:ratatui", "dep:crossterm"]
+# The TUI's app state, drawing and key handling (no terminal backend); the browser uses this
+tui = ["dep:ratatui"]
+# The CLI, terminal run loop, file output and Claude API client; off for the browser build
+native = ["tui", "ratatui/crossterm", "dep:tokio", "dep:reqwest", "dep:clap", "dep:tracing-subscriber", "dep:crossterm"]
 
 [dependencies]
 # Async runtime
@@ -53,7 +55,7 @@ anyhow = "1"
 toml = "1"
 
 # TUI
-ratatui = { version = "0.30", optional = true }
+ratatui = { version = "0.30", default-features = false, features = ["std", "all-widgets", "macros", "layout-cache"], optional = true }
 crossterm = { version = "0.29", optional = true }
 
 [[bin]]

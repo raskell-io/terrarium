@@ -1,12 +1,27 @@
 //! Input handling for the TUI.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 use super::App;
 use crate::engine::Engine;
 
-/// Handle a key event. Returns true if quit was requested.
-pub fn handle_key(key: KeyEvent, app: &mut App, engine: &Engine) -> bool {
+/// A key press, independent of where it came from (the terminal or the browser)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Char(char),
+    Tab,
+    /// Shift+Tab
+    BackTab,
+    Esc,
+    Left,
+    Right,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Other,
+}
+
+/// Handle a key press. Returns true if quit was requested.
+pub fn handle_key(key: Key, app: &mut App, engine: &Engine) -> bool {
     // Get living agent IDs
     let living_agents: Vec<uuid::Uuid> = engine
         .agent_views()
@@ -17,8 +32,8 @@ pub fn handle_key(key: KeyEvent, app: &mut App, engine: &Engine) -> bool {
 
     // Help overlay handling
     if app.show_help {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('?') => {
+        match key {
+            Key::Esc | Key::Char('?') => {
                 app.show_help = false;
             }
             _ => {}
@@ -26,80 +41,76 @@ pub fn handle_key(key: KeyEvent, app: &mut App, engine: &Engine) -> bool {
         return false;
     }
 
-    match key.code {
+    match key {
         // Quit
-        KeyCode::Char('q') | KeyCode::Char('Q') => return true,
+        Key::Char('q') | Key::Char('Q') => return app.can_quit,
 
         // Help
-        KeyCode::Char('?') => {
+        Key::Char('?') => {
             app.show_help = true;
         }
 
         // Simulation control
-        KeyCode::Char(' ') => {
+        Key::Char(' ') => {
             app.toggle_running();
         }
-        KeyCode::Char('n') | KeyCode::Char('N') => {
+        Key::Char('n') | Key::Char('N') => {
             // Step handled in main loop when paused
             if !app.running {
                 // Signal step needed (handled in main loop via flag)
                 app.running = false; // Ensure paused
             }
         }
-        KeyCode::Char('+') | KeyCode::Char('=') => {
+        Key::Char('+') | Key::Char('=') => {
             app.speed_up();
         }
-        KeyCode::Char('-') => {
+        Key::Char('-') => {
             app.slow_down();
         }
 
         // Navigation
-        KeyCode::Tab => {
-            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                app.select_prev(&living_agents);
-            } else {
-                app.select_next(&living_agents);
-            }
+        Key::Tab => {
+            app.select_next(&living_agents);
         }
-        KeyCode::BackTab => {
+        Key::BackTab => {
             app.select_prev(&living_agents);
         }
 
         // Number selection (1-9)
-        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+        Key::Char(c) if c.is_ascii_digit() && c != '0' => {
             let n = c.to_digit(10).unwrap() as usize;
             app.select_by_number(n, &living_agents);
         }
 
         // Arrow keys - find adjacent agent
-        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-            select_adjacent(key.code, app, engine, &living_agents);
+        Key::Left | Key::Right | Key::Up | Key::Down => {
+            select_adjacent(key, app, engine, &living_agents);
         }
 
         // View toggles
-        KeyCode::Char('e') | KeyCode::Char('E') => {
+        Key::Char('e') | Key::Char('E') => {
             app.show_events = !app.show_events;
         }
-        KeyCode::Char('t') | KeyCode::Char('T') => {
+        Key::Char('t') | Key::Char('T') => {
             app.toggle_trades();
         }
-        KeyCode::Char('a') | KeyCode::Char('A') => {
+        Key::Char('a') | Key::Char('A') => {
             app.show_agent = !app.show_agent;
         }
-        KeyCode::Char('f') | KeyCode::Char('F') => {
+        Key::Char('f') | Key::Char('F') => {
             app.show_full_agent = !app.show_full_agent;
         }
 
         // Scrolling
-        KeyCode::PageUp => {
+        Key::PageUp => {
             app.scroll_events_up();
         }
-        KeyCode::PageDown => {
+        Key::PageDown => {
             app.scroll_events_down();
         }
 
         // Escape
-        KeyCode::Esc => {
+        Key::Esc => {
             app.show_help = false;
         }
 
@@ -114,7 +125,7 @@ pub fn handle_key(key: KeyEvent, app: &mut App, engine: &Engine) -> bool {
 
 /// Select the agent in the given direction from current selection
 fn select_adjacent(
-    direction: KeyCode,
+    direction: Key,
     app: &mut App,
     engine: &Engine,
     living_agents: &[uuid::Uuid],
@@ -135,10 +146,10 @@ fn select_adjacent(
 
     // Calculate direction delta
     let (dx, dy): (i32, i32) = match direction {
-        KeyCode::Left => (-1, 0),
-        KeyCode::Right => (1, 0),
-        KeyCode::Up => (0, -1),
-        KeyCode::Down => (0, 1),
+        Key::Left => (-1, 0),
+        Key::Right => (1, 0),
+        Key::Up => (0, -1),
+        Key::Down => (0, 1),
         _ => return,
     };
 
@@ -153,10 +164,10 @@ fn select_adjacent(
 
         // Check if agent is in the right direction
         let in_direction = match direction {
-            KeyCode::Left => rel_x < 0,
-            KeyCode::Right => rel_x > 0,
-            KeyCode::Up => rel_y < 0,
-            KeyCode::Down => rel_y > 0,
+            Key::Left => rel_x < 0,
+            Key::Right => rel_x > 0,
+            Key::Up => rel_y < 0,
+            Key::Down => rel_y > 0,
             _ => false,
         };
 

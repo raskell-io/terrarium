@@ -33,6 +33,12 @@ pub struct App {
 
     /// Show trades panel (replaces events when active)
     pub show_trades: bool,
+
+    /// Whether Q quits (not in the browser, where there is nothing to quit to)
+    pub can_quit: bool,
+
+    /// Keys a particular client adds, listed in the help overlay: (key, what it does)
+    pub client_keys: Vec<(&'static str, &'static str)>,
 }
 
 impl App {
@@ -48,6 +54,8 @@ impl App {
             show_events: true,
             show_agent: true,
             show_trades: false,
+            can_quit: true,
+            client_keys: Vec::new(),
         }
     }
 

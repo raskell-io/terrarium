@@ -183,11 +183,12 @@ terrarium/
 │   ├── observation/
 │   │   ├── events.rs     # Event types
 │   │   └── chronicle.rs  # Narrative generation
-│   └── tui/              # Terminal UI client
+│   └── tui/              # Terminal UI client (shared with the browser)
 │       ├── mod.rs        # TUI entry point
 │       ├── app.rs        # Application state
 │       ├── ui.rs         # Rendering
 │       └── input.rs      # Key handling
+├── web/                  # The TUI in the browser (Ratzilla + WebAssembly)
 ├── scenarios/
 │   ├── first_winter.toml # MVP: 10 agents, 10x10
 │   └── great_valley.toml # Scale: 50 agents, 30x30, lakes

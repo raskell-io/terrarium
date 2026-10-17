@@ -16,6 +16,6 @@ pub mod observation;
 pub mod observer;
 pub mod structures;
 pub mod trade;
-#[cfg(feature = "native")]
+#[cfg(feature = "tui")]
 pub mod tui;
 pub mod world;
