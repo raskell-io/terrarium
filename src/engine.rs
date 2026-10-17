@@ -7,7 +7,7 @@ use crate::action::{Action, ActionContext, Direction, Neighbour};
 use crate::agent::{generate_names, generate_offspring_name, Agent, Episode, EpisodeCategory, Identity};
 use crate::config::Config;
 use crate::crafting::{MaterialType, RecipeRegistry, Tool, ToolQuality, ToolType};
-use crate::environment::{EnvironmentConfig, EnvironmentState};
+use crate::environment::{EnvironmentConfig, EnvironmentState, Weather, WeatherState};
 use crate::groups::{GroupTracker, Group};
 use crate::llm::LlmClient;
 use crate::observation::{Chronicle, Event};
@@ -38,6 +38,8 @@ pub struct Engine {
     trade_state: TradeState,
     /// Open mating proposals: proposer -> (target, last epoch the target can accept)
     mate_proposals: HashMap<Uuid, (Uuid, usize)>,
+    /// Droughts and storms on top of the seasons
+    weather: WeatherState,
 }
 
 /// Days a mating proposal stays open for the other agent to accept
@@ -91,6 +93,7 @@ impl Engine {
             recipe_registry: RecipeRegistry::new(),
             trade_state: TradeState::new(),
             mate_proposals: HashMap::new(),
+            weather: WeatherState::default(),
         })
     }
 
@@ -214,7 +217,14 @@ impl Engine {
 
     /// Get the current environment state
     pub fn environment_state(&self) -> EnvironmentState {
-        self.environment.state_at(self.world.epoch)
+        self.conditions(self.world.epoch)
+    }
+
+    /// The season's conditions with today's weather applied
+    fn conditions(&self, epoch: usize) -> EnvironmentState {
+        let mut state = self.environment.state_at(epoch);
+        self.weather.apply(&self.environment.weather, &mut state);
+        state
     }
 
     /// Get the environment configuration
@@ -321,11 +331,18 @@ impl Engine {
     async fn run_epoch(&mut self, epoch: usize) -> Result<()> {
         debug!("Epoch {} starting", epoch);
 
-        // Get current environment state
-        let env_state = self.environment.state_at(epoch);
-
         // Log epoch start
         self.log_and_track(Event::epoch_start(epoch))?;
+
+        // Weather turns, unpredictably, on top of the season
+        if let Some(weather) = self.weather.advance(&self.environment.weather, &mut rand::rng()) {
+            debug!("Weather: {}", weather.describe());
+            self.log_and_track(Event::weather_changed(epoch, weather.describe()))?;
+        }
+        let env_state = self.conditions(epoch);
+        if env_state.weather == Weather::Storm && self.environment.weather.storm_damage > 0 {
+            self.storm_damage(epoch)?;
+        }
 
         // 1. World tick (regenerate resources with environmental modifier)
         self.world.tick(self.config.world.food_regen_rate, env_state.food_regen_modifier, env_state.food_decay);
@@ -394,7 +411,7 @@ impl Engine {
         let mut actions: HashMap<Uuid, Action> = HashMap::new();
 
         // Build environment perception
-        let env_perception = self.environment.describe(epoch);
+        let env_perception = self.environment.describe(&env_state);
 
         for agent in &self.agents {
             if !agent.is_alive() {
@@ -566,7 +583,7 @@ impl Engine {
     /// Resolve all actions for an epoch
     fn resolve_actions(&mut self, epoch: usize, actions: HashMap<Uuid, Action>) -> Result<()> {
         // Get environment state for movement cost
-        let env_state = self.environment.state_at(epoch);
+        let env_state = self.conditions(epoch);
         let base_movement_cost = 0.05 * env_state.movement_cost;
         // Game and fish follow the seasons like plants do (scarce in winter)
         let game_availability = env_state.food_regen_modifier.min(1.0);
@@ -3421,6 +3438,25 @@ impl Engine {
     }
 
     /// Decay structures each epoch and remove destroyed ones
+    /// Storms batter every structure; ones worn down to nothing are destroyed
+    fn storm_damage(&mut self, epoch: usize) -> Result<()> {
+        let damage = self.environment.weather.storm_damage;
+        let mut destroyed = Vec::new();
+        for cell in &mut self.world.cells {
+            if let Some(structure) = cell.structure.as_mut().filter(|s| s.is_complete()) {
+                structure.decay(damage);
+                if structure.is_destroyed() {
+                    destroyed.push((cell.x, cell.y, structure.owner, structure.display_name()));
+                    cell.structure = None;
+                }
+            }
+        }
+        for (x, y, owner, name) in destroyed {
+            self.log_and_track(Event::structure_destroyed(epoch, owner, x, y, &name))?;
+        }
+        Ok(())
+    }
+
     fn decay_structures(&mut self, epoch: usize) -> Result<()> {
         // Collect structures to decay and check for destruction
         let mut destroyed: Vec<(usize, usize, Uuid, String)> = Vec::new();
@@ -4175,6 +4211,21 @@ mod tests {
         assert_eq!(belief(6, 7), Some(0), "within view: the agent sees it's gone");
         assert_eq!(belief(3, 3), Some(8), "2 cells away is still in view");
         assert_eq!(belief(9, 9), None, "out of view: nothing learned");
+    }
+
+    #[test]
+    fn test_storms_batter_structures() {
+        use crate::structures::{Structure, StructureType};
+        let (mut engine, a, _) = courting_pair("storm");
+        let mut lean_to = Structure::new(StructureType::LeanTo, a, 10, ToolQuality::Standard, 0);
+        lean_to.add_progress(10, 0);
+        lean_to.durability = 7;
+        engine.world.get_mut(5, 5).unwrap().structure = Some(lean_to);
+        engine.environment.weather = crate::environment::WeatherConfig::temperate();
+        engine.storm_damage(1).unwrap();
+        assert_eq!(engine.world.get(5, 5).unwrap().structure.as_ref().unwrap().durability, 2);
+        engine.storm_damage(2).unwrap();
+        assert!(engine.world.get(5, 5).unwrap().structure.is_none(), "worn-out structures are destroyed");
     }
 
     #[test]

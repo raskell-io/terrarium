@@ -188,6 +188,7 @@ pub enum EventViewType {
     TerritoryFight,
     TerritoryLost,
     // Structures
+    Weather,
     FarmProduced,
     StructureCompleted,
     StructureDestroyed,
@@ -755,6 +756,10 @@ impl EventView {
                     format!("{}'s farm produced {} food", name, amount),
                     EventViewType::FarmProduced,
                 )
+            }
+            EventType::WeatherChanged => {
+                let weather = event.data.description.as_deref().unwrap_or("fair");
+                (format!("The weather turned: {}", weather), EventViewType::Weather)
             }
             EventType::StructureCompleted => {
                 let name = agent_name(event.agent?);

@@ -130,6 +130,10 @@ impl Chronicle {
                     _ => Some(format!("**{}** attacked **{}**!", agent, target)),
                 }
             }
+            EventType::WeatherChanged => {
+                let weather = event.data.description.as_deref().unwrap_or("fair");
+                Some(format!("*The weather turned: {}.*", weather))
+            }
             EventType::Raided => {
                 let agent = agent_name?;
                 let target = target_name?;

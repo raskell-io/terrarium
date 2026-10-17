@@ -37,6 +37,121 @@ pub struct EnvironmentConfig {
     /// Day length in epochs (0 = no day/night cycle)
     #[serde(default)]
     pub day_length: usize,
+    /// Unpredictable weather on top of the seasons (off unless configured)
+    #[serde(default)]
+    pub weather: WeatherConfig,
+}
+
+/// Random weather events. Seasons are predictable; droughts and storms are not, and
+/// unpredictable shortfalls are what cross-cultural data link to conflict (Ember & Ember 1992)
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct WeatherConfig {
+    /// Daily chance a drought begins
+    #[serde(default)]
+    pub drought_chance: f64,
+    /// Drought length in days: (shortest, longest)
+    #[serde(default = "default_drought_days")]
+    pub drought_days: (usize, usize),
+    /// Plant and wood growth during a drought, as a fraction of normal
+    #[serde(default = "default_drought_growth")]
+    pub drought_growth: f64,
+    /// Daily chance a storm begins
+    #[serde(default)]
+    pub storm_chance: f64,
+    /// Storm length in days: (shortest, longest)
+    #[serde(default = "default_storm_days")]
+    pub storm_days: (usize, usize),
+    /// Hazard a storm adds for anyone unsheltered
+    #[serde(default = "default_storm_hazard")]
+    pub storm_hazard: f64,
+    /// Durability every structure loses per storm day
+    #[serde(default = "default_storm_damage")]
+    pub storm_damage: u32,
+}
+
+impl WeatherConfig {
+    /// A temperate climate: about one drought a year and a few storms
+    pub fn temperate() -> Self {
+        Self {
+            drought_chance: 0.01,
+            drought_days: default_drought_days(),
+            drought_growth: default_drought_growth(),
+            storm_chance: 0.03,
+            storm_days: default_storm_days(),
+            storm_hazard: default_storm_hazard(),
+            storm_damage: default_storm_damage(),
+        }
+    }
+}
+
+fn default_drought_days() -> (usize, usize) { (10, 20) }
+fn default_drought_growth() -> f64 { 0.3 }
+fn default_storm_days() -> (usize, usize) { (1, 2) }
+fn default_storm_hazard() -> f64 { 0.6 }
+fn default_storm_damage() -> u32 { 5 }
+
+/// The weather right now
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Weather {
+    #[default]
+    Fair,
+    Drought,
+    Storm,
+}
+
+impl Weather {
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Weather::Fair => "fair",
+            Weather::Drought => "drought: no rain, plants are withering",
+            Weather::Storm => "storm: wind and driving rain",
+        }
+    }
+}
+
+/// Weather as it unfolds over a run
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WeatherState {
+    pub current: Weather,
+    pub days_left: usize,
+}
+
+impl WeatherState {
+    /// Advance one day; returns the new weather if it changed
+    pub fn advance(&mut self, config: &WeatherConfig, rng: &mut impl rand::RngExt) -> Option<Weather> {
+        if self.days_left > 0 {
+            self.days_left -= 1;
+            if self.days_left > 0 {
+                return None;
+            }
+            self.current = Weather::Fair;
+            return Some(Weather::Fair);
+        }
+        let roll = rng.random::<f64>();
+        let (weather, (lo, hi)) = if roll < config.drought_chance {
+            (Weather::Drought, config.drought_days)
+        } else if roll < config.drought_chance + config.storm_chance {
+            (Weather::Storm, config.storm_days)
+        } else {
+            return None;
+        };
+        self.current = weather;
+        self.days_left = rng.random_range(lo.max(1)..=hi.max(lo.max(1)));
+        Some(weather)
+    }
+
+    /// Apply the weather to the season's conditions
+    pub fn apply(&self, config: &WeatherConfig, state: &mut EnvironmentState) {
+        match self.current {
+            Weather::Fair => {}
+            Weather::Drought => state.food_regen_modifier *= config.drought_growth,
+            Weather::Storm => {
+                state.hazard_level += config.storm_hazard;
+                state.movement_cost *= 1.5;
+            }
+        }
+        state.weather = self.current;
+    }
 }
 
 /// A phase within an environmental cycle (like a season)
@@ -150,6 +265,8 @@ pub struct EnvironmentState {
     pub cycle_position: f64,
     /// Current cycle number
     pub cycle_number: usize,
+    /// Weather on top of the season
+    pub weather: Weather,
 }
 
 impl EnvironmentConfig {
@@ -179,6 +296,7 @@ impl EnvironmentConfig {
                 food_decay: phase.food_decay,
                 cycle_position,
                 cycle_number,
+                weather: Weather::Fair,
             },
             None => EnvironmentState {
                 current_phase: "Unknown".to_string(),
@@ -191,17 +309,21 @@ impl EnvironmentConfig {
                 food_decay: 0.0,
                 cycle_position,
                 cycle_number,
+                weather: Weather::Fair,
             },
         }
     }
 
-    /// Get perception description for agents
-    pub fn describe(&self, epoch: usize) -> String {
-        let state = self.state_at(epoch);
+    /// Get perception description for agents, given the conditions (season plus weather)
+    pub fn describe(&self, state: &EnvironmentState) -> String {
         let mut desc = format!("Environment: {} ({})", self.name, state.current_phase);
 
         if !state.phase_description.is_empty() {
             desc.push_str(&format!(". {}", state.phase_description));
+        }
+
+        if state.weather != Weather::Fair {
+            desc.push_str(&format!(". Weather: {}", state.weather.describe()));
         }
 
         if state.hazard_level > 0.0 {
@@ -305,6 +427,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: true,
             base_temperature: Temperature::Temperate,
             day_length: 0,
+            weather: WeatherConfig::temperate(),
         }
     }
 
@@ -366,6 +489,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: true,
             base_temperature: Temperature::Freezing,
             day_length: 0,
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -416,6 +540,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: false,
             base_temperature: Temperature::Freezing,
             day_length: 1, // Sol is ~same as Earth day
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -455,6 +580,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: false,
             base_temperature: Temperature::Freezing, // Average
             day_length: 14, // Half the cycle
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -505,6 +631,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: true,
             base_temperature: Temperature::Temperate,
             day_length: 0,
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -544,6 +671,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: false,
             base_temperature: Temperature::Hot,
             day_length: 0, // Tidally locked
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -594,6 +722,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: true,
             base_temperature: Temperature::Hot,
             day_length: 0,
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -644,6 +773,7 @@ impl EnvironmentConfig {
             breathable_atmosphere: true, // Artificial
             base_temperature: Temperature::Temperate,
             day_length: 0, // 90-minute orbits, abstracted away
+            weather: WeatherConfig::default(),
         }
     }
 
@@ -680,6 +810,36 @@ impl EnvironmentConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_weather_comes_and_goes_unpredictably() {
+        let config = WeatherConfig::temperate();
+        let mut weather = WeatherState::default();
+        let mut rng = rand::rng();
+        let (mut drought_days, mut storm_days, mut droughts) = (0, 0, 0);
+        let days = 100_000;
+        for _ in 0..days {
+            if weather.advance(&config, &mut rng) == Some(Weather::Drought) {
+                droughts += 1;
+            }
+            match weather.current {
+                Weather::Drought => drought_days += 1,
+                Weather::Storm => storm_days += 1,
+                Weather::Fair => {}
+            }
+        }
+        // ~1 drought per 100 fair days, lasting 10-20 days; storms 3x as likely, 1-2 days
+        let per_year = droughts as f64 / (days as f64 / 100.0);
+        assert!((0.5..1.2).contains(&per_year), "droughts per year: {}", per_year);
+        assert!(drought_days > storm_days, "droughts last longer");
+        assert!(storm_days > 1000);
+
+        let mut state = EnvironmentConfig::earth_temperate().state_at(30);
+        let normal = state.food_regen_modifier;
+        WeatherState { current: Weather::Drought, days_left: 3 }.apply(&config, &mut state);
+        assert!((state.food_regen_modifier - normal * 0.3).abs() < 1e-9);
+        assert!(EnvironmentConfig::moon().weather.drought_chance == 0.0, "weather is opt-in");
+    }
 
     #[test]
     fn test_earth_temperate_phases() {

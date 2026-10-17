@@ -83,6 +83,7 @@ pub fn draw(frame: &mut Frame, area: Rect, events: &[EventView], current_epoch: 
             EventViewType::TerritoryFight => ("⚔", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
             EventViewType::TerritoryLost => ("▢", Style::default().fg(Color::DarkGray)),
             // Structure events
+            EventViewType::Weather => ("☁", Style::default().fg(Color::Cyan)),
             EventViewType::FarmProduced => ("♠", Style::default().fg(Color::Green)),
             EventViewType::StructureCompleted => ("⌂", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             EventViewType::StructureDestroyed => ("✗", Style::default().fg(Color::Red)),

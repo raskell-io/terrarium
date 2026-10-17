@@ -66,6 +66,9 @@ pub enum EventType {
     TerritoryFight,
     TerritoryLost,
 
+    // World
+    WeatherChanged,
+
     // Structures
     FarmProduced,
     StructureCompleted,
@@ -724,6 +727,19 @@ impl Event {
                 amount: Some(amount),
                 territory_x: Some(x),
                 territory_y: Some(y),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    pub fn weather_changed(epoch: usize, weather: &str) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::WeatherChanged,
+            agent: None,
+            target: None,
+            data: EventData {
+                description: Some(weather.to_string()),
                 ..EventData::empty()
             },
         }

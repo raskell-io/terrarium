@@ -109,6 +109,16 @@ energy_drain_modifier = 1.5
 movement_cost_modifier = 1.3
 description = "Cold and harsh. Food is scarce."
 
+# Unpredictable weather on top of the seasons
+[environment.weather]
+drought_chance = 0.01       # Daily chance a drought begins (~1 a year)
+drought_days = [10, 20]
+drought_growth = 0.3        # Plants and wood grow at 30% of normal during a drought
+storm_chance = 0.03         # Daily chance a storm begins (a few a year)
+storm_days = [1, 2]
+storm_hazard = 0.6          # Extra exposure for anyone unsheltered
+storm_damage = 5            # Durability every structure loses per storm day
+
 [llm]
 provider = "anthropic"
 model = "claude-sonnet-5-5"
