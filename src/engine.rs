@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -43,7 +43,7 @@ pub struct Engine {
 }
 
 /// Days a mating proposal stays open for the other agent to accept
-const MATE_PROPOSAL_DAYS: usize = 3;
+const MATE_PROPOSAL_DAYS: usize = 10;
 
 impl Engine {
     /// Create a new simulation engine that writes its event log, chronicle and snapshots to
@@ -66,10 +66,11 @@ impl Engine {
         let names = generate_names(config.agents.count);
         let mut agents = Vec::with_capacity(config.agents.count);
         // Founders are adults of mixed ages, as in any real band, unless the scenario fixes one
-        // age; a single shared age would make the whole founding generation die out together
+        // age; a single shared age would make the whole founding generation die out together.
+        // Like a real age pyramid, there are more young adults than old ones
         use rand::RngExt;
         let mut rng = rand::rng();
-        let adult_ages = config.aging.youth_end..=config.aging.prime_end.max(config.aging.youth_end);
+        let (young, old) = (config.aging.youth_end as f64, config.aging.prime_end.max(config.aging.youth_end) as f64);
 
         // Scatter founders evenly across the world on a lattice, each on the nearest land
         let (w, h) = (config.world.width, config.world.height);
@@ -82,7 +83,10 @@ impl Engine {
             let y = ((row as f64 + 0.5) * h as f64 / rows as f64) as usize;
             let (x, y) = world.nearest_land(x.min(w - 1), y.min(h - 1));
             let mut agent = Agent::new(name, x, y, config.agents.starting_food);
-            agent.physical.age = config.agents.starting_age.unwrap_or_else(|| rng.random_range(adult_ages.clone()));
+            agent.physical.age = config
+                .agents
+                .starting_age
+                .unwrap_or_else(|| (young + (old - young) * rng.random::<f64>().powi(2)).round() as usize);
             agents.push(agent);
         }
 
@@ -2979,15 +2983,34 @@ impl Engine {
         }
 
         let decay = self.config.reproduction.courtship_decay;
+        let threshold = self.config.reproduction.courtship_threshold;
+        // A pair bond is mutual: the two partners' feelings average at or past the mating
+        // threshold (the same test mating uses). It lasts through time apart; budding or
+        // one-sided courtships fade without attention
+        let feeling = |a: Uuid, b: Uuid| {
+            self.agents
+                .iter()
+                .find(|x| x.id == a)
+                .and_then(|x| x.reproduction.courtship_progress.get(&b).copied())
+                .unwrap_or(0.0)
+        };
+        let bonds: HashSet<(Uuid, Uuid)> = self
+            .agents
+            .iter()
+            .flat_map(|a| a.reproduction.courtship_progress.keys().map(move |b| (a.id, *b)))
+            .filter(|&(a, b)| (feeling(a, b) + feeling(b, a)) / 2.0 >= threshold)
+            .collect();
 
         for agent in &mut self.agents {
             if !agent.is_alive() {
                 continue;
             }
 
-            // Decay courtship scores
-            agent.reproduction.courtship_progress.retain(|_, score| {
-                *score -= decay;
+            let me = agent.id;
+            agent.reproduction.courtship_progress.retain(|other, score| {
+                if !bonds.contains(&(me, *other)) {
+                    *score -= decay;
+                }
                 *score > 0.0
             });
 
@@ -3099,6 +3122,19 @@ impl Engine {
                 .collect(),
             strength: agent.physical.health * agent.age_modifier(&self.config.aging),
             mating_food_cost: if self.config.reproduction.enabled { self.config.reproduction.mating_food_cost } else { 0 },
+            mating_energy: self.config.reproduction.min_energy_to_reproduce,
+            partner: {
+                // The person this agent is most taken with, if they can see them
+                let sight = self.world.sight_from(pos.0, pos.1, self.config.agents.view_radius);
+                agent
+                    .reproduction
+                    .courtship_progress
+                    .iter()
+                    .filter_map(|(id, score)| self.agents.iter().find(|a| a.id == *id && a.is_alive()).map(|a| (a, *score)))
+                    .filter(|(a, _)| a.physical.x.abs_diff(pos.0).max(a.physical.y.abs_diff(pos.1)) <= sight)
+                    .max_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(a, score)| (a.id, a.physical.x, a.physical.y, score))
+            },
             fertile: self.config.reproduction.enabled && self.config.aging.is_fertile(agent.physical.age),
             claimed_cells: self
                 .world

@@ -49,6 +49,10 @@ pub struct ActionContext {
     pub territory_owner_nearby: Option<Uuid>,
     /// Of an age to have children (and reproduction is on)
     pub fertile: bool,
+    /// The person this agent is most taken with, if in sight: (id, x, y, courtship score)
+    pub partner: Option<(Uuid, usize, usize, f64)>,
+    /// Energy each partner needs to mate
+    pub mating_energy: f64,
     /// Food each partner must spend to mate (0 if reproduction is off)
     pub mating_food_cost: u32,
     /// Everyone within one step, as this agent sees them

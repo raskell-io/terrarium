@@ -89,7 +89,7 @@ pub struct AgentsConfig {
     #[serde(default = "default_personality")]
     pub personality: String,
     /// Age of every founding agent in epochs (default: a mix of adult ages, from the end of
-    /// youth to the end of prime, so generations overlap)
+    /// youth to the end of prime and weighted toward the young, so generations overlap)
     #[serde(default)]
     pub starting_age: Option<usize>,
     /// Fraction of carried food that spoils each epoch (food in storage keeps)
@@ -152,7 +152,7 @@ impl Default for ReproductionConfig {
         Self {
             enabled: true,
             gestation_period: 10,
-            mating_food_cost: 5,
+            mating_food_cost: 3,
             gestation_energy_drain: 0.02,
             courtship_threshold: 0.7,
             courtship_increment: 0.15,
@@ -160,14 +160,16 @@ impl Default for ReproductionConfig {
             mating_cooldown: 20,
             offspring_starting_food: 5,
             min_health_to_reproduce: 0.5,
-            min_energy_to_reproduce: 0.4,
+            min_energy_to_reproduce: 0.25,
         }
     }
 }
 
 fn default_reproduction_enabled() -> bool { true }
 fn default_gestation_period() -> usize { 10 }
-fn default_mating_food_cost() -> u32 { 5 }
+// Mating's costs sit below an agent's everyday state (they carry ~3-7 food, energy ~0.45),
+// so a bonded pair can line up; at 5 food and 0.4 energy they rarely both qualify on one day
+fn default_mating_food_cost() -> u32 { 3 }
 fn default_gestation_energy_drain() -> f64 { 0.02 }
 fn default_courtship_threshold() -> f64 { 0.7 }
 fn default_courtship_increment() -> f64 { 0.15 }
@@ -175,7 +177,7 @@ fn default_courtship_decay() -> f64 { 0.02 }
 fn default_mating_cooldown() -> usize { 20 }
 fn default_offspring_starting_food() -> u32 { 5 }
 fn default_min_health_to_reproduce() -> f64 { 0.5 }
-fn default_min_energy_to_reproduce() -> f64 { 0.4 }
+fn default_min_energy_to_reproduce() -> f64 { 0.25 }
 
 /// Aging system configuration
 #[derive(Debug, Clone, Deserialize)]

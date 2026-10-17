@@ -303,7 +303,7 @@ pub fn decide(
     }
 
     // 7. Reproduce when ready and a partner is here: breeding is what the rest is for
-    if let Some(action) = mate(agent, context, mate_proposals) {
+    if let Some(action) = mate(agent, context, mate_proposals, &mut rng) {
         return action;
     }
 
@@ -450,7 +450,7 @@ fn can_reproduce(agent: &Agent, context: &ActionContext) -> bool {
 
 /// Breed when reserves allow (capital breeding): in good condition, able to pay for it, and with
 /// a partner who is here, never kin (the Westermarck effect)
-fn mate(agent: &Agent, context: &ActionContext, mate_proposals: &[(Uuid, &str)]) -> Option<Action> {
+fn mate(agent: &Agent, context: &ActionContext, mate_proposals: &[(Uuid, &str)], rng: &mut impl RngExt) -> Option<Action> {
     let ready = can_reproduce(agent, context)
         && Body::of(agent).value() >= BREEDING_RESERVE
         && agent.physical.food >= context.mating_food_cost;
@@ -459,19 +459,35 @@ fn mate(agent: &Agent, context: &ActionContext, mate_proposals: &[(Uuid, &str)])
     }
     let sentiment = |id: &Uuid| agent.beliefs.social.get(id).map_or(0.0, |b| b.sentiment);
     let unrelated = |id: &Uuid| context.neighbours.iter().any(|n| n.id == *id && n.relatedness == 0.0);
-    let rested = agent.physical.energy > 0.4;
+    let rested = agent.physical.energy > context.mating_energy;
 
     if let Some((proposer, name)) = mate_proposals.iter().find(|(id, _)| sentiment(id) >= 0.0 && unrelated(id)) {
         debug!("Instinct: accepting mating proposal from {}", name);
         return Some(if rested { Action::Mate { target: *proposer } } else { Action::Rest });
     }
-    agent
+    let bonded = agent
         .reproduction
         .courtship_progress
         .iter()
         .filter(|(id, score)| **score >= 0.7 && unrelated(id))
         .max_by(|a, b| a.1.total_cmp(b.1))
-        .map(|(id, _)| if rested { Action::Mate { target: *id } } else { Action::Rest })
+        // Keep wooing while proposing: courting is how the partner's feelings catch up
+        .map(|(id, _)| match (rested, rng.random::<f64>() < 0.5) {
+            (false, _) => Action::Rest,
+            (true, true) => Action::Mate { target: *id },
+            (true, false) => Action::Court { target: *id },
+        });
+    if bonded.is_some() {
+        return bonded;
+    }
+    // A bonded partner in sight but not at hand: go to them (pair-bonded partners keep close)
+    let pos = (agent.physical.x, agent.physical.y);
+    match context.partner {
+        Some((id, x, y, score)) if score >= 0.7 && !context.neighbours.iter().any(|n| n.id == id) => {
+            Direction::toward(pos, (x, y)).map(Action::Move)
+        }
+        _ => None,
+    }
 }
 
 /// Courtship, teaching and gossip
@@ -496,6 +512,13 @@ fn socialise(agent: &Agent, context: &ActionContext, epoch: usize, rng: &mut imp
         if let Some(target) = current {
             if rng.random::<f64>() < 0.6 {
                 return Some(Action::Court { target });
+            }
+        } else if let Some((_, x, y, _)) = context.partner.filter(|(_, _, _, score)| *score >= 0.3) {
+            // The one we're courting is in sight but not here: seek them out
+            if rng.random::<f64>() < 0.6 {
+                if let Some(dir) = Direction::toward((agent.physical.x, agent.physical.y), (x, y)) {
+                    return Some(Action::Move(dir));
+                }
             }
         } else if rng.random::<f64>() < 0.4 * agent.identity.personality.extraversion {
             let familiar = neighbours
@@ -718,8 +741,13 @@ mod tests {
             neighbours: vec![partner.clone()],
             ..Default::default()
         };
+        // Proposing or wooing the partner, never off to the building site
         let action = decide(&agent, &LocalFood::default(), &context, &[], &[], &[], 1);
-        assert!(matches!(action, Action::Mate { target } if target == partner.id), "got {:?}", action);
+        assert!(
+            matches!(action, Action::Mate { target } | Action::Court { target } if target == partner.id),
+            "got {:?}",
+            action
+        );
 
         // ...but never with kin
         let kin = Neighbour { relatedness: 0.5, ..partner };
