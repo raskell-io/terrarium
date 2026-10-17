@@ -31,6 +31,12 @@ pub struct World {
     pub epoch: usize,
 }
 
+/// Round to an integer randomly, so the expected value equals `x`
+fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
+    let base = x.floor() as u32;
+    if rng.random::<f64>() < x.fract() { base + 1 } else { base }
+}
+
 /// Food an agent can see from its position
 #[derive(Debug, Clone, Default)]
 pub struct LocalFood {
@@ -154,12 +160,26 @@ impl World {
     /// conditions (seasons, weather, etc.). A modifier of 1.0 is normal, < 1.0 reduces
     /// regeneration, > 1.0 increases it.
     pub fn regenerate_resources(&mut self, regen_rate: f64, modifier: f64) {
+        let mut rng = rand::rng();
         for cell in &mut self.cells {
             if cell.terrain == Terrain::Fertile && cell.food < cell.food_capacity {
-                let effective_rate = regen_rate * modifier;
-                let regen = (cell.food_capacity as f64 * effective_rate).ceil() as u32;
+                // Round randomly so the expected regrowth matches the rate exactly
+                // (rounding up made any modifier > 0 yield at least 1 food per cell)
+                let regen = random_round(cell.food_capacity as f64 * regen_rate * modifier, &mut rng);
                 cell.food = (cell.food + regen).min(cell.food_capacity);
             }
+        }
+    }
+
+    /// Standing food dies back by the given fraction (e.g. in winter)
+    pub fn decay_food(&mut self, fraction: f64) {
+        if fraction <= 0.0 {
+            return;
+        }
+        let mut rng = rand::rng();
+        for cell in &mut self.cells {
+            let lost = random_round(cell.food as f64 * fraction, &mut rng);
+            cell.food = cell.food.saturating_sub(lost);
         }
     }
 
@@ -167,8 +187,9 @@ impl World {
     ///
     /// The `food_regen_modifier` adjusts resource regeneration based on environmental
     /// conditions (1.0 = normal, < 1.0 = scarce, > 1.0 = abundant).
-    pub fn tick(&mut self, regen_rate: f64, food_regen_modifier: f64) {
+    pub fn tick(&mut self, regen_rate: f64, food_regen_modifier: f64, food_decay: f64) {
         self.epoch += 1;
+        self.decay_food(food_decay);
         self.regenerate_resources(regen_rate, food_regen_modifier);
     }
 
@@ -281,6 +302,29 @@ fn direction_name(from_x: usize, from_y: usize, to_x: usize, to_y: usize) -> &'s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_food_decay_and_regen_rounding() {
+        let config = WorldConfig {
+            width: 10,
+            height: 10,
+            fertile_fraction: 1.0,
+            initial_food_per_fertile: 10,
+            food_regen_rate: 0.1,
+        };
+        let mut world = World::new(&config);
+        let total = |w: &World| w.cells.iter().map(|c| c.food).sum::<u32>();
+
+        world.decay_food(0.0);
+        assert_eq!(total(&world), 1000);
+        world.decay_food(1.0);
+        assert_eq!(total(&world), 0);
+
+        // Expected regrowth 0.3 per cell: random rounding keeps the total near 30,
+        // where rounding up would have given exactly 100
+        world.regenerate_resources(0.1, 0.3);
+        assert!((10..=60).contains(&total(&world)), "got {}", total(&world));
+    }
 
     #[test]
     fn test_world_creation() {

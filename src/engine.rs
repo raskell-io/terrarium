@@ -329,7 +329,7 @@ impl Engine {
         self.log_and_track(Event::epoch_start(epoch))?;
 
         // 1. World tick (regenerate resources with environmental modifier)
-        self.world.tick(self.config.world.food_regen_rate, env_state.food_regen_modifier);
+        self.world.tick(self.config.world.food_regen_rate, env_state.food_regen_modifier, env_state.food_decay);
 
         // 1b. Structure production (farms produce food)
         self.process_structure_production(epoch)?;

@@ -60,6 +60,9 @@ pub struct Phase {
     /// Movement cost modifier (1.0 = normal)
     #[serde(default = "default_one")]
     pub movement_cost_modifier: f64,
+    /// Fraction of standing food on the map that dies back each epoch (0.0 = none)
+    #[serde(default)]
+    pub food_decay: f64,
     /// Description for agents
     #[serde(default)]
     pub description: String,
@@ -141,6 +144,8 @@ pub struct EnvironmentState {
     pub energy_drain: f64,
     /// Movement cost modifier
     pub movement_cost: f64,
+    /// Fraction of standing food that dies back this epoch
+    pub food_decay: f64,
     /// Position in cycle (0.0 to 1.0)
     pub cycle_position: f64,
     /// Current cycle number
@@ -171,6 +176,7 @@ impl EnvironmentConfig {
                 hazard_type: self.hazard_type,
                 energy_drain: 0.05 * phase.energy_drain_modifier * (1.0 + self.base_hazard),
                 movement_cost: phase.movement_cost_modifier,
+                food_decay: phase.food_decay,
                 cycle_position,
                 cycle_number,
             },
@@ -182,6 +188,7 @@ impl EnvironmentConfig {
                 hazard_type: self.hazard_type,
                 energy_drain: 0.05,
                 movement_cost: 1.0,
+                food_decay: 0.0,
                 cycle_position,
                 cycle_number,
             },
@@ -224,6 +231,7 @@ fn default_phases() -> Vec<Phase> {
         hazard_modifier: 1.0,
         energy_drain_modifier: 1.0,
         movement_cost_modifier: 1.0,
+        food_decay: 0.0,
         description: String::new(),
     }]
 }
@@ -254,6 +262,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 0.9,
                     movement_cost_modifier: 1.0,
+                    food_decay: 0.0,
                     description: "Plants bloom and food becomes more abundant.".to_string(),
                 },
                 Phase {
@@ -264,6 +273,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.3,
                     energy_drain_modifier: 0.8,
                     movement_cost_modifier: 1.0,
+                    food_decay: 0.0,
                     description: "Warm weather and plentiful resources.".to_string(),
                 },
                 Phase {
@@ -274,6 +284,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 1.0,
                     movement_cost_modifier: 1.0,
+                    food_decay: 0.0,
                     description: "Harvest time, but resources are dwindling.".to_string(),
                 },
                 Phase {
@@ -284,6 +295,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.0,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 1.3,
+                    food_decay: 0.0,
                     description: "Cold and harsh. Food is scarce.".to_string(),
                 },
             ],
@@ -311,6 +323,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 1.2,
                     movement_cost_modifier: 1.2,
+                    food_decay: 0.0,
                     description: "Endless daylight but still freezing. Brief window for resources.".to_string(),
                 },
                 Phase {
@@ -321,6 +334,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.5,
                     energy_drain_modifier: 1.8,
                     movement_cost_modifier: 1.5,
+                    food_decay: 0.0,
                     description: "Temperatures plummet. Darkness approaches.".to_string(),
                 },
                 Phase {
@@ -331,6 +345,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 3.0,
                     energy_drain_modifier: 2.5,
                     movement_cost_modifier: 2.0,
+                    food_decay: 0.0,
                     description: "Months of total darkness. Extreme cold. Survival is paramount.".to_string(),
                 },
                 Phase {
@@ -341,6 +356,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.0,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 1.3,
+                    food_decay: 0.0,
                     description: "Light returns. Ice begins to soften.".to_string(),
                 },
             ],
@@ -368,6 +384,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.8,
                     energy_drain_modifier: 1.3,
                     movement_cost_modifier: 1.1,
+                    food_decay: 0.0,
                     description: "Relatively calm. Dust levels low.".to_string(),
                 },
                 Phase {
@@ -378,6 +395,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.5,
                     energy_drain_modifier: 2.0,
                     movement_cost_modifier: 2.0,
+                    food_decay: 0.0,
                     description: "Global dust storms. Reduced visibility. Solar power limited.".to_string(),
                 },
                 Phase {
@@ -388,6 +406,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.2,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 1.3,
+                    food_decay: 0.0,
                     description: "Dust settles. Recovery period.".to_string(),
                 },
             ],
@@ -415,6 +434,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.0, // Heat + radiation
                     energy_drain_modifier: 1.2,
                     movement_cost_modifier: 0.8, // Low gravity helps
+                    food_decay: 0.0,
                     description: "Two weeks of sunlight. Surface temperatures reach 120°C.".to_string(),
                 },
                 Phase {
@@ -425,6 +445,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.0, // Extreme cold
                     energy_drain_modifier: 2.0,
                     movement_cost_modifier: 1.0,
+                    food_decay: 0.0,
                     description: "Two weeks of darkness. Surface drops to -180°C.".to_string(),
                 },
             ],
@@ -452,6 +473,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 0.9,
                     movement_cost_modifier: 1.0,
+                    food_decay: 0.0,
                     description: "Alien flora blooms. Resources are plentiful.".to_string(),
                 },
                 Phase {
@@ -462,6 +484,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.0,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 1.5,
+                    food_decay: 0.0,
                     description: "Violent weather patterns. Seek shelter.".to_string(),
                 },
                 Phase {
@@ -472,6 +495,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.0,
                     energy_drain_modifier: 1.2,
                     movement_cost_modifier: 1.1,
+                    food_decay: 0.0,
                     description: "Native life hibernates. Quiet but lean times.".to_string(),
                 },
             ],
@@ -499,6 +523,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.0,
                     energy_drain_modifier: 1.3,
                     movement_cost_modifier: 1.2,
+                    food_decay: 0.0,
                     description: "The habitable band between eternal day and night.".to_string(),
                 },
                 Phase {
@@ -509,6 +534,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 3.0,
                     energy_drain_modifier: 2.0,
                     movement_cost_modifier: 1.8,
+                    food_decay: 0.0,
                     description: "Toxic precipitation. Stay indoors.".to_string(),
                 },
             ],
@@ -536,6 +562,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 1.0,
                     movement_cost_modifier: 1.2,
+                    food_decay: 0.0,
                     description: "Bearable temperatures. Best time for activity.".to_string(),
                 },
                 Phase {
@@ -546,6 +573,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.0,
                     energy_drain_modifier: 1.8,
                     movement_cost_modifier: 1.5,
+                    food_decay: 0.0,
                     description: "Scorching heat. Conserve energy and water.".to_string(),
                 },
                 Phase {
@@ -556,6 +584,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.5,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 2.0,
+                    food_decay: 0.0,
                     description: "Blinding sandstorms sweep across the dunes.".to_string(),
                 },
             ],
@@ -583,6 +612,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 0.5,
                     energy_drain_modifier: 1.0,
                     movement_cost_modifier: 0.7, // Microgravity
+                    food_decay: 0.0,
                     description: "Systems nominal. Routine station life.".to_string(),
                 },
                 Phase {
@@ -593,6 +623,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 2.5,
                     energy_drain_modifier: 1.5,
                     movement_cost_modifier: 0.7,
+                    food_decay: 0.0,
                     description: "Increased solar radiation. Shelter in shielded areas.".to_string(),
                 },
                 Phase {
@@ -603,6 +634,7 @@ impl EnvironmentConfig {
                     hazard_modifier: 1.0,
                     energy_drain_modifier: 1.2,
                     movement_cost_modifier: 0.8,
+                    food_decay: 0.0,
                     description: "Station maintenance and resupply.".to_string(),
                 },
             ],
