@@ -2,13 +2,14 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
 use uuid::Uuid;
 
+use crate::tui::theme;
 use crate::observer::{AgentView, WorldView};
 use crate::world::Terrain;
 
@@ -22,7 +23,9 @@ pub fn draw(
 ) {
     let block = Block::default()
         .title(format!(" World - Day {} ", world.epoch))
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FG));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -47,15 +50,15 @@ pub fn draw(
                     if let Some(selected_id) = selected {
                         if territory.owner_id == selected_id {
                             // Own territory - green tint
-                            Some(Color::Rgb(30, 50, 30))
+                            Some(theme::LAND_OWN)
                         } else {
                             // Check if selected agent is a guest (we'd need guest list, but TerritoryView has guest_count)
                             // For now, show foreign territory as red tint
-                            Some(Color::Rgb(50, 30, 30))
+                            Some(theme::LAND_FOREIGN)
                         }
                     } else {
                         // No agent selected, show neutral territory marker
-                        Some(Color::Rgb(40, 40, 50))
+                        Some(theme::LAND_NEUTRAL)
                     }
                 } else {
                     None
@@ -71,11 +74,11 @@ pub fn draw(
 
                 let mut style = if is_selected {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
+                        .fg(theme::BG)
+                        .bg(theme::YELLOW)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::WHITE).add_modifier(Modifier::BOLD)
                 };
 
                 // Apply territory background if not selected (selected has priority)
@@ -93,16 +96,16 @@ pub fn draw(
                     let (ch, color) = if structure.is_complete {
                         // Complete structures
                         match structure.structure_type.as_str() {
-                            "LeanTo" => ('△', Color::Yellow),
-                            "Shelter" => ('▲', Color::Yellow),
-                            "Storage" => ('□', Color::Cyan),
-                            "Workbench" => ('⚒', Color::LightBlue),
-                            "Farm" => ('♠', Color::Green),
-                            _ => ('■', Color::White),
+                            "LeanTo" => ('△', theme::YELLOW),
+                            "Shelter" => ('▲', theme::YELLOW),
+                            "Storage" => ('□', theme::CYAN),
+                            "Workbench" => ('⚒', theme::LIGHT_BLUE),
+                            "Farm" => ('♠', theme::GREEN),
+                            _ => ('■', theme::WHITE),
                         }
                     } else {
                         // Under construction
-                        ('░', Color::DarkGray)
+                        ('░', theme::MUTED)
                     };
                     let mut style = Style::default().fg(color);
                     if let Some(bg) = territory_bg {
@@ -114,15 +117,15 @@ pub fn draw(
                     let (ch, mut style) = match cell.terrain {
                         Terrain::Fertile => {
                             if cell.food > 10 {
-                                ('*', Style::default().fg(Color::Green))
+                                ('*', Style::default().fg(theme::GREEN))
                             } else if cell.food > 0 {
-                                ('*', Style::default().fg(Color::DarkGray))
+                                ('*', Style::default().fg(theme::MUTED))
                             } else {
-                                ('.', Style::default().fg(Color::DarkGray))
+                                ('.', Style::default().fg(theme::MUTED))
                             }
                         }
-                        Terrain::Barren => ('.', Style::default().fg(Color::Rgb(50, 50, 50))),
-                        Terrain::Water => ('~', Style::default().fg(Color::Blue)),
+                        Terrain::Barren => ('.', Style::default().fg(theme::GROUND)),
+                        Terrain::Water => ('~', Style::default().fg(theme::BLUE)),
                     };
                     // Apply territory background
                     if let Some(bg) = territory_bg {
@@ -151,7 +154,7 @@ pub fn draw(
                 if x < spans.len() {
                     spans[x] = Span::styled(
                         format!("{} ", first_char.to_ascii_lowercase()),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::MUTED),
                     );
                 }
                 Line::from(spans)

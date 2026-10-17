@@ -2,12 +2,13 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
+use crate::tui::theme;
 use super::widgets;
 use super::App;
 use crate::engine::Engine;
@@ -22,6 +23,9 @@ pub fn draw(frame: &mut Frame, engine: &Engine, app: &mut App) {
         .map(|a| a.id)
         .collect();
     app.ensure_selection(&living_agents);
+
+    // Paint the whole screen in the theme's background and text colour first
+    frame.render_widget(Block::default().style(Style::default().bg(theme::BG).fg(theme::FG)), frame.area());
 
     // Main layout
     let main_chunks = Layout::default()
@@ -107,7 +111,9 @@ fn draw_agent(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
         // No agent selected
         let block = Block::default()
             .title(" No Agent Selected ")
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FG));
         frame.render_widget(block, area);
     }
 }
@@ -123,9 +129,9 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
     };
 
     let status_style = if app.running {
-        Style::default().fg(Color::Green)
+        Style::default().fg(theme::GREEN)
     } else {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme::YELLOW)
     };
 
     let speed_text = format!("{}ms/epoch", app.speed_ms);
@@ -135,13 +141,13 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
 
     // Choose phase color based on hazard level
     let phase_style = if env_state.hazard_level > 0.5 {
-        Style::default().fg(Color::Red)
+        Style::default().fg(theme::RED)
     } else if env_state.food_regen_modifier < 0.5 {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme::YELLOW)
     } else if env_state.food_regen_modifier > 1.0 {
-        Style::default().fg(Color::Green)
+        Style::default().fg(theme::GREEN)
     } else {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme::CYAN)
     };
 
     let line = Line::from(vec![
@@ -179,7 +185,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, engine: &Engine, app: &App) {
         )),
     ]);
 
-    let paragraph = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
+    let paragraph = Paragraph::new(line).style(Style::default().bg(theme::BAR).fg(theme::FG));
     frame.render_widget(paragraph, area);
 }
 
@@ -191,7 +197,7 @@ fn draw_help(frame: &mut Frame, app: &App) {
         Line::from(Span::styled(
             "TERRARIUM - Keybindings",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::CYAN)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -249,7 +255,9 @@ fn draw_help(frame: &mut Frame, app: &App) {
     let block = Block::default()
         .title(" Help ")
         .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FG))
+        .style(Style::default().bg(theme::BG).fg(theme::FG));
 
     let paragraph = Paragraph::new(help_text)
         .block(block)

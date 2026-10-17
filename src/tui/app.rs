@@ -45,7 +45,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             running: false,
-            speed_ms: 500,
+            speed_ms: 800,
             selected_agent: None,
             selected_index: 0,
             events_scroll: 0,

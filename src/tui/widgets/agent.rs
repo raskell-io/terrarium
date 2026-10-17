@@ -2,12 +2,13 @@
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Wrap},
     Frame,
 };
 
+use crate::tui::theme;
 use crate::observer::AgentView;
 
 /// Draw the agent panel
@@ -21,10 +22,12 @@ pub fn draw(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool, g
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FG))
         .style(if agent.alive {
             Style::default()
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::MUTED)
         });
 
     let inner = block.inner(area);
@@ -36,7 +39,7 @@ pub fn draw(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool, g
             Line::from(Span::styled(
                 "DECEASED",
                 Style::default()
-                    .fg(Color::Red)
+                    .fg(theme::RED)
                     .add_modifier(Modifier::BOLD),
             )),
         ])
@@ -74,11 +77,11 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
     // Health bar
     let health_pct = (agent.health * 100.0) as u16;
     let health_color = if health_pct > 60 {
-        Color::Green
+        theme::GREEN
     } else if health_pct > 30 {
-        Color::Yellow
+        theme::YELLOW
     } else {
-        Color::Red
+        theme::RED
     };
     let health_gauge = Gauge::default()
         .block(Block::default().title("Health"))
@@ -90,11 +93,11 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
     // Hunger bar (inverted - low hunger is good)
     let hunger_pct = (agent.hunger * 100.0) as u16;
     let hunger_color = if hunger_pct < 30 {
-        Color::Green
+        theme::GREEN
     } else if hunger_pct < 60 {
-        Color::Yellow
+        theme::YELLOW
     } else {
-        Color::Red
+        theme::RED
     };
     let hunger_gauge = Gauge::default()
         .block(Block::default().title("Hunger"))
@@ -106,11 +109,11 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
     // Energy bar
     let energy_pct = (agent.energy * 100.0) as u16;
     let energy_color = if energy_pct > 60 {
-        Color::Cyan
+        theme::CYAN
     } else if energy_pct > 30 {
-        Color::Yellow
+        theme::YELLOW
     } else {
-        Color::Red
+        theme::RED
     };
     let energy_gauge = Gauge::default()
         .block(Block::default().title("Energy"))
@@ -121,11 +124,11 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
 
     // Position, age, and inventory
     let age_color = match agent.life_stage.as_str() {
-        "youth" => Color::LightCyan,
-        "prime" => Color::Green,
-        "elderly" => Color::Yellow,
-        "ancient" => Color::Red,
-        _ => Color::White,
+        "youth" => theme::LIGHT_CYAN,
+        "prime" => theme::GREEN,
+        "elderly" => theme::YELLOW,
+        "ancient" => theme::RED,
+        _ => theme::WHITE,
     };
     let gen_display = if agent.generation > 0 {
         format!(" Gen {}", agent.generation)
@@ -138,16 +141,16 @@ fn draw_stats(frame: &mut Frame, area: Rect, agent: &AgentView) {
             format!("{} ({})", agent.age, agent.life_stage),
             Style::default().fg(age_color),
         ),
-        Span::styled(gen_display, Style::default().fg(Color::Magenta)),
+        Span::styled(gen_display, Style::default().fg(theme::MAGENTA)),
         Span::raw("  Pos: "),
         Span::styled(
             format!("({}, {})", agent.position.0, agent.position.1),
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::CYAN),
         ),
         Span::raw("  Food: "),
         Span::styled(
             format!("{}", agent.food),
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme::GREEN),
         ),
     ]);
     let info_paragraph = Paragraph::new(info);
@@ -161,7 +164,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
     // Personality
     lines.push(Line::from(Span::styled(
         &agent.personality_summary,
-        Style::default().fg(Color::White),
+        Style::default().fg(theme::WHITE),
     )));
 
     // Aspiration
@@ -169,7 +172,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         Span::raw("Aspiration: "),
         Span::styled(
             &agent.aspiration,
-            Style::default().fg(Color::Magenta),
+            Style::default().fg(theme::MAGENTA),
         ),
     ]));
 
@@ -177,7 +180,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
     if let Some(goal) = &agent.current_goal {
         lines.push(Line::from(vec![
             Span::raw("Goal: "),
-            Span::styled(goal, Style::default().fg(Color::Yellow)),
+            Span::styled(goal, Style::default().fg(theme::YELLOW)),
         ]));
     }
 
@@ -195,8 +198,8 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
             if let Some(birth_epoch) = repr.expected_birth {
                 lines.push(Line::from(vec![
                     Span::raw("  "),
-                    Span::styled("♥♥", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" Expecting (day {})", birth_epoch), Style::default().fg(Color::Magenta)),
+                    Span::styled("♥♥", Style::default().fg(theme::MAGENTA).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" Expecting (day {})", birth_epoch), Style::default().fg(theme::MAGENTA)),
                 ]));
             }
         }
@@ -205,7 +208,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         if repr.num_children > 0 {
             lines.push(Line::from(vec![
                 Span::raw("  Children: "),
-                Span::styled(format!("{}", repr.num_children), Style::default().fg(Color::LightGreen)),
+                Span::styled(format!("{}", repr.num_children), Style::default().fg(theme::LIGHT_GREEN)),
             ]));
         }
 
@@ -214,9 +217,9 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
             let hearts = courtship_display(*score);
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(hearts, Style::default().fg(Color::LightMagenta)),
+                Span::styled(hearts, Style::default().fg(theme::LIGHT_MAGENTA)),
                 Span::raw(" "),
-                Span::styled(name, Style::default().fg(Color::Cyan)),
+                Span::styled(name, Style::default().fg(theme::CYAN)),
             ]));
         }
 
@@ -224,7 +227,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         if repr.on_cooldown {
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled("(cooldown)", Style::default().fg(Color::DarkGray)),
+                Span::styled("(cooldown)", Style::default().fg(theme::MUTED)),
             ]));
         }
     }
@@ -241,11 +244,11 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         for belief in &agent.social_beliefs {
             let trust_hearts = trust_display(belief.trust);
             let sentiment_color = if belief.sentiment > 0.2 {
-                Color::Green
+                theme::GREEN
             } else if belief.sentiment < -0.2 {
-                Color::Red
+                theme::RED
             } else {
-                Color::White
+                theme::WHITE
             };
             let sentiment_text = if belief.sentiment > 0.5 {
                 "likes"
@@ -261,9 +264,9 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
 
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(&belief.about, Style::default().fg(Color::Cyan)),
+                Span::styled(&belief.about, Style::default().fg(theme::CYAN)),
                 Span::raw(": "),
-                Span::styled(trust_hearts, Style::default().fg(Color::Red)),
+                Span::styled(trust_hearts, Style::default().fg(theme::RED)),
                 Span::raw(" "),
                 Span::styled(sentiment_text, Style::default().fg(sentiment_color)),
             ]));
@@ -281,16 +284,16 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         for skill in agent.skills.iter().take(4) {
             let level_bar = skill_bar(skill.level);
             let level_color = if skill.level >= 0.7 {
-                Color::Green
+                theme::GREEN
             } else if skill.level >= 0.3 {
-                Color::Yellow
+                theme::YELLOW
             } else {
-                Color::DarkGray
+                theme::MUTED
             };
             let tier = skill_tier(skill.level);
             lines.push(Line::from(vec![
                 Span::raw("  "),
-                Span::styled(&skill.name, Style::default().fg(Color::Cyan)),
+                Span::styled(&skill.name, Style::default().fg(theme::CYAN)),
                 Span::raw(": "),
                 Span::styled(level_bar, Style::default().fg(level_color)),
                 Span::raw(" "),
@@ -310,7 +313,7 @@ fn draw_info(frame: &mut Frame, area: Rect, agent: &AgentView, show_full: bool) 
         for memory in agent.recent_memories.iter().take(3) {
             lines.push(Line::from(Span::styled(
                 format!("  {}", memory),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             )));
         }
     }

@@ -6,6 +6,7 @@
 
 mod app;
 mod input;
+pub mod theme;
 mod ui;
 mod widgets;
 

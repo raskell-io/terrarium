@@ -2,19 +2,22 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
+use crate::tui::theme;
 use crate::observer::TradeStateView;
 
 /// Draw the trades panel
 pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
     let block = Block::default()
         .title(" Trades & Obligations ")
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER))
+        .title_style(Style::default().fg(theme::FG));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -26,34 +29,34 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
         lines.push(Line::from(Span::styled(
             "Pending Trade Offers",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::YELLOW)
                 .add_modifier(Modifier::BOLD),
         )));
 
         for proposal in &trade_view.pending_proposals {
             let expiry_style = if proposal.expires_in <= 1 {
-                Style::default().fg(Color::Red)
+                Style::default().fg(theme::RED)
             } else if proposal.expires_in <= 3 {
-                Style::default().fg(Color::Yellow)
+                Style::default().fg(theme::YELLOW)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme::MUTED)
             };
 
             lines.push(Line::from(vec![
-                Span::styled("  ⇄ ", Style::default().fg(Color::Yellow)),
-                Span::styled(&proposal.proposer_name, Style::default().fg(Color::Cyan)),
+                Span::styled("  ⇄ ", Style::default().fg(theme::YELLOW)),
+                Span::styled(&proposal.proposer_name, Style::default().fg(theme::CYAN)),
                 Span::raw(" → "),
-                Span::styled(&proposal.recipient_name, Style::default().fg(Color::Cyan)),
+                Span::styled(&proposal.recipient_name, Style::default().fg(theme::CYAN)),
             ]));
 
             lines.push(Line::from(vec![
                 Span::raw("    Offers: "),
-                Span::styled(&proposal.offering, Style::default().fg(Color::Green)),
+                Span::styled(&proposal.offering, Style::default().fg(theme::GREEN)),
             ]));
 
             lines.push(Line::from(vec![
                 Span::raw("    Wants:  "),
-                Span::styled(&proposal.requesting, Style::default().fg(Color::Magenta)),
+                Span::styled(&proposal.requesting, Style::default().fg(theme::MAGENTA)),
                 Span::styled(
                     format!("  ({}d)", proposal.expires_in),
                     expiry_style,
@@ -65,7 +68,7 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
     } else {
         lines.push(Line::from(Span::styled(
             "No pending trade offers",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
         lines.push(Line::from(""));
     }
@@ -81,7 +84,7 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
         lines.push(Line::from(Span::styled(
             "Active Alliances",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::CYAN)
                 .add_modifier(Modifier::BOLD),
         )));
 
@@ -98,13 +101,13 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
                 .unwrap_or_else(|| "permanent".to_string());
 
             lines.push(Line::from(vec![
-                Span::styled("  ⛨ ", Style::default().fg(Color::Cyan)),
-                Span::styled(&alliance.debtor_name, Style::default().fg(Color::Cyan)),
+                Span::styled("  ⛨ ", Style::default().fg(theme::CYAN)),
+                Span::styled(&alliance.debtor_name, Style::default().fg(theme::CYAN)),
                 Span::raw(" ↔ "),
-                Span::styled(&alliance.creditor_name, Style::default().fg(Color::Cyan)),
+                Span::styled(&alliance.creditor_name, Style::default().fg(theme::CYAN)),
                 Span::styled(
                     format!("  ({})", duration_str),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::MUTED),
                 ),
             ]));
         }
@@ -122,15 +125,15 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
         lines.push(Line::from(Span::styled(
             "Service Obligations",
             Style::default()
-                .fg(Color::Magenta)
+                .fg(theme::MAGENTA)
                 .add_modifier(Modifier::BOLD),
         )));
 
         for debt in debts {
             let deadline_style = match debt.deadline_in {
-                Some(d) if d < 0 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                Some(d) if d <= 3 => Style::default().fg(Color::Yellow),
-                _ => Style::default().fg(Color::DarkGray),
+                Some(d) if d < 0 => Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                Some(d) if d <= 3 => Style::default().fg(theme::YELLOW),
+                _ => Style::default().fg(theme::MUTED),
             };
 
             let deadline_str = debt
@@ -147,22 +150,22 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
                 .unwrap_or_else(|| "no deadline".to_string());
 
             lines.push(Line::from(vec![
-                Span::styled("  → ", Style::default().fg(Color::Magenta)),
-                Span::styled(&debt.debtor_name, Style::default().fg(Color::Cyan)),
+                Span::styled("  → ", Style::default().fg(theme::MAGENTA)),
+                Span::styled(&debt.debtor_name, Style::default().fg(theme::CYAN)),
                 Span::raw(" owes "),
-                Span::styled(&debt.creditor_name, Style::default().fg(Color::Cyan)),
+                Span::styled(&debt.creditor_name, Style::default().fg(theme::CYAN)),
             ]));
 
             lines.push(Line::from(vec![
                 Span::raw("    "),
-                Span::styled(&debt.service, Style::default().fg(Color::White)),
+                Span::styled(&debt.service, Style::default().fg(theme::WHITE)),
                 Span::styled(format!("  ({})", deadline_str), deadline_style),
             ]));
         }
     } else if alliances.is_empty() {
         lines.push(Line::from(Span::styled(
             "No active service obligations",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
     }
 
@@ -174,16 +177,16 @@ pub fn draw(frame: &mut Frame, area: Rect, trade_view: &TradeStateView) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  No active trades or obligations",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  Agents can propose trades with:",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
         lines.push(Line::from(Span::styled(
             "  TRADE <name> OFFER <items> FOR <items>",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::YELLOW),
         )));
     }
 

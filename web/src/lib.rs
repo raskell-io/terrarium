@@ -144,7 +144,8 @@ pub fn start() -> Result<(), JsValue> {
     // WebGL2 resizes cleanly with the window (the DOM backend panics when its grid shrinks)
     // and draws the page's own font
     let options = WebGl2BackendOptions::new()
-        .font_atlas_config(FontAtlasConfig::dynamic(&["JetBrains Mono"], 16.0));
+        .font_atlas_config(FontAtlasConfig::dynamic(&["JetBrains Mono"], 16.0))
+        .canvas_padding_color(terrarium::tui::theme::BG);
     let backend = WebGl2Backend::new_with_options(options).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let mut terminal = Terminal::new(backend).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
