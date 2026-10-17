@@ -648,7 +648,7 @@ impl Action {
             actions.push("HUNT - hunt game in the surrounding area for food, hide and bone (requires spear or bow; better where there are animal tracks)".to_string());
         }
         if unlocked_actions.contains(&"fish") {
-            actions.push("FISH - fish for food (requires fishing pole)".to_string());
+            actions.push("FISH - fish in the water next to you (requires fishing pole)".to_string());
         }
         if unlocked_actions.contains(&"chop") {
             actions.push("CHOP - efficiently chop wood (requires axe)".to_string());

@@ -122,6 +122,7 @@ pub fn draw(
                             }
                         }
                         Terrain::Barren => ('.', Style::default().fg(Color::Rgb(50, 50, 50))),
+                        Terrain::Water => ('~', Style::default().fg(Color::Blue)),
                     };
                     // Apply territory background
                     if let Some(bg) = territory_bg {

@@ -56,8 +56,7 @@ impl Engine {
 
         for (i, name) in names.into_iter().enumerate() {
             // Scatter agents across the world
-            let x = (i * 3) % config.world.width;
-            let y = (i * 3) / config.world.width % config.world.height;
+            let (x, y) = world.nearest_land((i * 3) % config.world.width, (i * 3) / config.world.width % config.world.height);
             let mut agent = Agent::new(name, x, y, config.agents.starting_food);
             agent.physical.age = starting_age;
             agents.push(agent);
@@ -597,7 +596,8 @@ impl Engine {
                     let new_x = (agent.physical.x as i32 + dx).max(0) as usize;
                     let new_y = (agent.physical.y as i32 + dy).max(0) as usize;
 
-                    if new_x < self.world.width && new_y < self.world.height {
+                    // Nobody walks into a lake
+                    if self.world.walkable(new_x, new_y) {
                         let from = (agent.physical.x, agent.physical.y);
                         agent.physical.x = new_x;
                         agent.physical.y = new_y;
@@ -1243,6 +1243,7 @@ impl Engine {
                                 gathered.push((MaterialType::Wood, wood_amount));
                                 gathered.push((MaterialType::Fiber, fiber_amount));
                             }
+                            Terrain::Water => {}
                             Terrain::Barren => {
                                 // Stone and occasionally flint from barren terrain
                                 let stone_amount = ((2.0 + foraging_skill).round() as u32).min(stone_stock);
@@ -1260,6 +1261,7 @@ impl Engine {
                             match terrain {
                                 Terrain::Fertile => cell.wood -= taken,
                                 Terrain::Barren => cell.stone -= taken,
+                                Terrain::Water => {}
                             }
                         }
 
@@ -1442,12 +1444,25 @@ impl Engine {
                     let foraging_skill = agent.skills.level("foraging");
                     let tool_bonus = agent.physical.tool_bonus_for_skill("foraging");
 
-                    // Calculate success chance (base 50% + skill + tool)
-                    let success_chance = (0.5 + foraging_skill * 0.25 + tool_bonus * 0.15) * game_availability;
+                    // Fishing needs water next to the angler; a bite is likelier the more fish are
+                    // in reach, saturating like a hunter's encounters
+                    let pos = (agent.physical.x, agent.physical.y);
+                    let fish = self.world.fish_around(pos.0, pos.1);
+                    if fish == 0.0 && !self.world.adjacent(pos.0, pos.1).iter().any(|c| c.terrain == Terrain::Water) {
+                        debug!("{} has no water to fish in", agent.name());
+                        continue;
+                    }
+                    let bite = 1.0 - (-FISH_SEARCH_EFFICIENCY * fish).exp();
+                    let success_chance = bite * (0.5 + foraging_skill * 0.25 + tool_bonus * 0.15).min(1.0);
 
-                    if rand::random::<f64>() < success_chance {
+                    let wanted = (2.0 + foraging_skill * 3.0 + tool_bonus).round() as u32;
+                    let food_gained = if rand::random::<f64>() < success_chance {
+                        self.world.take_fish(pos.0, pos.1, wanted)
+                    } else {
+                        0
+                    };
+                    if food_gained > 0 {
                         // Successful fishing!
-                        let food_gained = (2.0 + foraging_skill * 3.0 + tool_bonus).round() as u32;
                         self.agents[agent_idx].add_food(food_gained);
 
                         // Practice foraging
@@ -2042,7 +2057,7 @@ impl Engine {
                         let new_x = (pos.0 as i32 + dx).max(0) as usize;
                         let new_y = (pos.1 as i32 + dy).max(0) as usize;
 
-                        if new_x < self.world.width && new_y < self.world.height {
+                        if self.world.walkable(new_x, new_y) {
                             self.agents[agent_idx].physical.x = new_x;
                             self.agents[agent_idx].physical.y = new_y;
                         }
@@ -2129,7 +2144,7 @@ impl Engine {
                                 let new_x = (pos.0 as i32 + dx).max(0) as usize;
                                 let new_y = (pos.1 as i32 + dy).max(0) as usize;
 
-                                if new_x < self.world.width && new_y < self.world.height {
+                                if self.world.walkable(new_x, new_y) {
                                     self.agents[agent_idx].physical.x = new_x;
                                     self.agents[agent_idx].physical.y = new_y;
                                 }
@@ -3898,6 +3913,9 @@ fn is_adjacent(a: &Agent, b: &Agent) -> bool {
 /// How effectively a hunter searches their range: encounter chance = 1 - exp(-a * animals)
 const HUNT_SEARCH_EFFICIENCY: f64 = 0.15;
 
+/// How readily fish bite: chance = 1 - exp(-a * fish in reach)
+const FISH_SEARCH_EFFICIENCY: f64 = 0.1;
+
 /// Build progress from one day's work (recipes need 10-30; a skilled builder
 /// finishes a lean-to in a day, a novice in about three)
 fn build_progress(crafting_skill: f64) -> u32 {
@@ -3913,6 +3931,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("terrarium-test-{}-{}", test_name, std::process::id()));
         let mut config = Config::default();
         config.agents.count = 2;
+        config.world.water.lakes = 0;
         let mut engine = Engine::new(config, dir.to_str().unwrap()).unwrap();
 
         let (a, b) = (engine.agents[0].id, engine.agents[1].id);
@@ -4097,6 +4116,35 @@ mod tests {
         assert_eq!(engine.world.get(5, 5).unwrap().stone, 0);
         assert_eq!(mined(&engine), 3);
         assert!(engine.world.describe_cell(5, 5).contains("quarried out"));
+    }
+
+    #[test]
+    fn test_lakes_block_walkers_and_feed_anglers() {
+        let (mut engine, a, _) = courting_pair("lake");
+        let lake = engine.world.get_mut(6, 5).unwrap();
+        lake.terrain = Terrain::Water;
+        lake.fish = 4.0;
+        lake.fish_capacity = 15.0;
+
+        engine.resolve_actions(1, HashMap::from([(a, Action::Move(Direction::East))])).unwrap();
+        assert_eq!(engine.agents[0].physical.x, 5, "nobody walks into a lake");
+
+        engine.agents[0].physical.tools.push(Tool::new(ToolType::FishingPole, ToolQuality::Standard, None, 0));
+        let food = engine.agents[0].physical.food;
+        for day in 2..40 {
+            engine.agents[0].physical.energy = 1.0;
+            engine.resolve_actions(day, HashMap::from([(a, Action::Fish)])).unwrap();
+        }
+        let caught = engine.agents[0].physical.food - food;
+        let left = engine.world.get(6, 5).unwrap().fish;
+        assert!(caught > 0 && caught <= 4, "caught {}", caught);
+        assert!((left - (4.0 - caught as f64)).abs() < 1e-9, "fish are caught, not conjured");
+
+        // Away from water there is nothing to fish
+        engine.agents[0].physical.x = 2;
+        let food = engine.agents[0].physical.food;
+        engine.resolve_actions(50, HashMap::from([(a, Action::Fish)])).unwrap();
+        assert_eq!(engine.agents[0].physical.food, food);
     }
 
     #[test]

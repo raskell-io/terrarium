@@ -11,7 +11,7 @@ Will they cooperate, compete, or something else entirely?
 [world]
 width = 10
 height = 10
-fertile_fraction = 0.3      # 30% of cells produce food
+fertile_fraction = 0.3      # 30% of land cells produce food
 initial_food_per_fertile = 15
 food_regen_rate = 0.1       # 10% of capacity per epoch
 
@@ -27,6 +27,13 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 # game_per_barren = 0.3     # ...and a barren one
 # growth = 0.03             # Logistic breeding rate per day, scaled by season
 # dispersal = 0.1           # Share of each herd that wanders to neighbouring cells daily
+
+# Lakes (defaults shown); laid out before land, so fertile_fraction applies to land
+# [world.water]
+# lakes = 1
+# lake_size = 6             # Connected cells per lake
+# fish_per_water = 15.0     # Fish (food units) a lake cell supports
+# fish_growth = 0.05        # Logistic breeding rate per day, scaled by season
 
 [agents]
 count = 10

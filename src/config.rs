@@ -328,6 +328,7 @@ impl Default for Config {
                 food_regen_rate: 0.1,
                 materials: Default::default(),
                 wildlife: Default::default(),
+                water: Default::default(),
             },
             agents: AgentsConfig {
                 count: 10,

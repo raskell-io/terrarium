@@ -54,7 +54,7 @@ ACTION (low-level)
 ```
 PHYSICAL (hard rules)
 ├── Space: 10x10 grid
-├── Terrain: Fertile (food) or Barren
+├── Terrain: Fertile (food), Barren, or Water (lakes: impassable, fish)
 ├── Bodies: hunger, energy, health, position
 ├── Resources: food regenerates slowly
 ├── Materials: wood/fiber stands regrow logistically; stone is finite
