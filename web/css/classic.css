@@ -1,0 +1,95 @@
+/* Classic: the curses-era look. Black screen, the 16-colour VGA palette, one DOS-style face
+   for everything, panels drawn with double-line borders. Deliberately dark in either theme. */
+
+body[data-look="classic"] {
+  --c-black: #000000; --c-blue: #000080; --c-green: #008000; --c-cyan: #008080;
+  --c-red: #800000; --c-magenta: #800080; --c-brown: #808000; --c-lgray: #c0c0c0;
+  --c-dgray: #808080; --c-lblue: #5555ff; --c-lgreen: #55ff55; --c-lcyan: #55ffff;
+  --c-lred: #ff5555; --c-lmagenta: #ff55ff; --c-yellow: #ffff55; --c-white: #ffffff;
+
+  --bg: var(--c-black);
+  --fg: var(--c-lgray);
+  --link: var(--c-lcyan);
+  --focus: var(--c-yellow);
+  --bad: var(--c-lred);
+  --key-on-bg: var(--c-lgray);
+  --key-on-fg: var(--c-black);
+  --bar-bg: var(--c-dgray);
+  --bar-fg: var(--c-lgreen);
+  --bar-hunger: var(--c-yellow);
+  --bar-energy: var(--c-lcyan);
+  --gap: 8px;
+
+  --font-title: "VT323", "Courier New", ui-monospace, monospace;
+  --font-ui: "VT323", "Courier New", ui-monospace, monospace;
+  --font-body: "VT323", "Courier New", ui-monospace, monospace;
+  --size-body: 20px;
+  --size-lead: 22px;
+  --size-ui: 22px;
+  --size-small: 19px;
+  color-scheme: dark;
+}
+
+[data-look="classic"] .logo-text { display: none; }
+[data-look="classic"] .logo-ascii {
+  margin: 0;
+  color: var(--c-yellow);
+  font-family: ui-monospace, "Menlo", "Consolas", monospace;
+  font-size: clamp(10px, 2.2vw, 20px);
+  line-height: 1.05;
+  overflow-x: auto;
+}
+[data-look="classic"] .tagline { color: var(--c-lgray); }
+[data-look="classic"] .panel {
+  border: 3px double var(--c-dgray);
+  padding: 6px 10px 8px;
+  background: var(--c-black);
+}
+[data-look="classic"] .panel h2,
+[data-look="classic"] .embark h2,
+[data-look="classic"] .about h3 { color: var(--c-white); font-weight: normal; }
+[data-look="classic"] .about h3 { font-size: var(--size-ui); }
+[data-look="classic"] button {
+  background: var(--c-black);
+  border: 1px solid var(--c-dgray);
+  color: var(--c-lgray);
+}
+[data-look="classic"] button:hover { color: var(--c-white); border-color: var(--c-lgray); }
+[data-look="classic"] .scenario[aria-selected="true"],
+[data-look="classic"] .look-option[aria-checked="true"] {
+  background: var(--c-lgray);
+  color: var(--c-black);
+  border-color: var(--c-lgray);
+}
+[data-look="classic"] .scenario[aria-selected="true"] .meta,
+[data-look="classic"] .scenario[aria-selected="true"] .desc { color: var(--c-black); }
+[data-look="classic"] .scenario .meta { color: var(--c-lcyan); }
+[data-look="classic"] .scenario .name::before { content: "► "; color: var(--c-yellow); }
+[data-look="classic"] .embark-button { color: var(--c-lgreen); border-color: var(--c-lgreen); }
+[data-look="classic"] .embark-button::before { content: "[e] "; color: var(--c-lgreen); }
+[data-look="classic"] kbd { color: var(--c-lgreen); }
+[data-look="classic"] .brand { color: var(--c-yellow); border: none; font-size: 26px; }
+[data-look="classic"] .world-name { color: var(--c-white); }
+[data-look="classic"] .date { color: var(--c-lgray); }
+[data-look="classic"] .weather.storm { color: var(--c-lcyan); }
+[data-look="classic"] .weather.drought { color: var(--c-yellow); }
+[data-look="classic"] .hover-info { color: var(--c-lgray); border-top: 1px solid var(--c-dgray); }
+[data-look="classic"] .map-scroll { background: var(--c-black); }
+[data-look="classic"] .unit-list li:hover { background: #222; }
+[data-look="classic"] .unit-list li.sel { background: var(--c-blue); color: var(--c-white); }
+[data-look="classic"] .unit-list .glyph { font-family: ui-monospace, Menlo, Consolas, monospace; }
+[data-look="classic"] .bar { height: 10px; }
+[data-look="classic"] .selected-body h3 { margin: 0; font-weight: normal; font-size: var(--size-ui); }
+[data-look="classic"] .selected-body .meta { color: var(--c-dgray); }
+
+/* Announcement colours, as the old announcement screen used them */
+[data-look="classic"] .log .k-death { color: var(--c-lred); }
+[data-look="classic"] .log .k-birth { color: var(--c-lgreen); }
+[data-look="classic"] .log .k-conflict { color: var(--c-red); }
+[data-look="classic"] .log .k-land { color: var(--c-brown); }
+[data-look="classic"] .log .k-build { color: var(--c-yellow); }
+[data-look="classic"] .log .k-share { color: var(--c-white); }
+[data-look="classic"] .log .k-social { color: var(--c-lmagenta); }
+[data-look="classic"] .log .k-illness { color: var(--c-magenta); }
+[data-look="classic"] .log .k-weather { color: var(--c-lcyan); }
+[data-look="classic"] .log .k-other { color: var(--c-lgray); }
