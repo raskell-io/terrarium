@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::action::{Action, Direction};
+use crate::action::{Action, ActionContext, Direction};
 use crate::agent::{generate_names, generate_offspring_name, Agent, Episode, EpisodeCategory, Identity};
 use crate::config::Config;
 use crate::crafting::{MaterialType, RecipeRegistry, Tool, ToolQuality, ToolType};
@@ -400,6 +400,7 @@ impl Engine {
             let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
             let perception = format!("{}\n{}", env_perception, world_perception);
             let local_food = self.world.local_food(agent.physical.x, agent.physical.y);
+            let action_context = self.action_context(agent);
 
             // Get nearby agents
             let nearby: Vec<(Uuid, &str)> = self
@@ -482,6 +483,7 @@ impl Engine {
                     agent,
                     &perception,
                     &local_food,
+                    &action_context,
                     &nearby,
                     epoch,
                     &pending_trades,
@@ -545,6 +547,8 @@ impl Engine {
         // Get environment state for movement cost
         let env_state = self.environment.state_at(epoch);
         let base_movement_cost = 0.05 * env_state.movement_cost;
+        // Game and fish follow the seasons like plants do (scarce in winter)
+        let game_availability = env_state.food_regen_modifier.min(1.0);
         let aging_config = self.config.aging.clone();
 
         // Collect gather actions per cell for splitting
@@ -587,6 +591,8 @@ impl Engine {
                         let from = (agent.physical.x, agent.physical.y);
                         agent.physical.x = new_x;
                         agent.physical.y = new_y;
+                        // Walking away leaves the shelter (protection is tied to being there)
+                        agent.physical.leave_shelter();
                         // Movement cost affected by environment and age (elderly use more energy)
                         let movement_cost = base_movement_cost / age_mod;
                         agent.physical.energy = (agent.physical.energy - movement_cost).max(0.0);
@@ -1352,7 +1358,7 @@ impl Engine {
                     let tool_bonus = agent.physical.tool_bonus_for_skill("hunting");
 
                     // Calculate success chance (base 40% + skill + tool)
-                    let success_chance = 0.4 + hunting_skill * 0.3 + tool_bonus * 0.2;
+                    let success_chance = (0.4 + hunting_skill * 0.3 + tool_bonus * 0.2) * game_availability;
 
                     if rand::random::<f64>() < success_chance {
                         // Successful hunt!
@@ -1409,7 +1415,7 @@ impl Engine {
                     let tool_bonus = agent.physical.tool_bonus_for_skill("foraging");
 
                     // Calculate success chance (base 50% + skill + tool)
-                    let success_chance = 0.5 + foraging_skill * 0.25 + tool_bonus * 0.15;
+                    let success_chance = (0.5 + foraging_skill * 0.25 + tool_bonus * 0.15) * game_availability;
 
                     if rand::random::<f64>() < success_chance {
                         // Successful fishing!
@@ -2793,6 +2799,63 @@ impl Engine {
         }
     }
 
+    /// What this agent can craft, build and do with structures and territory here
+    fn action_context(&self, agent: &Agent) -> ActionContext {
+        let pos = (agent.physical.x, agent.physical.y);
+        let cell = self.world.get(pos.0, pos.1);
+        let structure = cell.and_then(|c| c.structure.as_ref());
+        let territory = cell.and_then(|c| c.territory.as_ref());
+
+        let craftable_tools = self.recipe_registry.craftable_tools(
+            &agent.physical.materials,
+            &agent.physical.tools,
+            agent.skills.level("crafting"),
+        );
+
+        // New structures need an empty cell; an unfinished one can be worked on further
+        let buildable_structures = match (cell, structure) {
+            (Some(cell), None) => crate::structures::StructureRecipeRegistry::new().buildable(
+                &agent.physical.materials,
+                cell.terrain,
+                |tool| agent.physical.has_tool(tool),
+            ),
+            (_, Some(s)) if !s.is_complete() => vec![s.structure_type],
+            _ => vec![],
+        };
+
+        let owns_territory = territory.is_some_and(|t| t.owner == agent.id);
+        let can_mark_territory = self.count_agent_territories(agent.id) < 4
+            && match territory {
+                None => true,
+                Some(t) => t.owner == agent.id || t.strength < 0.3,
+            }
+            && !owns_territory;
+        let trespassers = if owns_territory {
+            let guests = &territory.unwrap().allowed_guests;
+            self.agents
+                .iter()
+                .filter(|a| a.is_alive() && a.id != agent.id && !guests.contains(&a.id))
+                .filter(|a| (a.physical.x, a.physical.y) == pos)
+                .map(|a| (a.id, a.name().to_string()))
+                .collect()
+        } else {
+            vec![]
+        };
+
+        ActionContext {
+            craftable_tools,
+            buildable_structures,
+            has_shelter: structure.is_some_and(|s| s.structure_type.is_shelter() && s.can_use(agent.id)),
+            has_storage: structure.is_some_and(|s| s.structure_type.has_storage() && s.can_use(agent.id)),
+            owns_structure: structure.is_some_and(|s| s.owner == agent.id),
+            is_sheltered: agent.physical.sheltered_at.is_some(),
+            can_mark_territory,
+            trespassers,
+            is_trespassing: territory
+                .is_some_and(|t| t.owner != agent.id && !t.allowed_guests.contains(&agent.id)),
+        }
+    }
+
     fn agent_name(&self, id: Uuid) -> String {
         self.agents
             .iter()
@@ -3756,6 +3819,33 @@ mod tests {
         let seized = engine.agents[0].physical.food;
         assert!((3..=5).contains(&seized), "seized {}", seized);
         assert_eq!(engine.agents[1].physical.food, 10 - seized);
+    }
+
+    #[test]
+    fn test_action_context_offers_craft_and_build() {
+        use crate::crafting::ToolType;
+        use crate::structures::StructureType;
+        let (mut engine, _, _) = courting_pair("context");
+        let context = engine.action_context(&engine.agents[0]);
+        assert!(context.craftable_tools.is_empty());
+        assert!(context.buildable_structures.is_empty());
+
+        let agent = &mut engine.agents[0];
+        agent.physical.add_material(MaterialType::Stone, 2);
+        agent.physical.add_material(MaterialType::Wood, 3);
+        agent.physical.add_material(MaterialType::Fiber, 2);
+        let context = engine.action_context(&engine.agents[0]);
+        assert!(context.craftable_tools.contains(&ToolType::StoneAxe));
+        assert!(context.buildable_structures.contains(&StructureType::LeanTo));
+        assert!(context.can_mark_territory);
+    }
+
+    #[test]
+    fn test_moving_leaves_shelter() {
+        let (mut engine, a, _) = courting_pair("shelter");
+        engine.agents[0].physical.enter_shelter(5, 5);
+        engine.resolve_actions(1, HashMap::from([(a, Action::Move(Direction::North))])).unwrap();
+        assert!(engine.agents[0].physical.sheltered_at.is_none());
     }
 
     #[test]

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::action::Action;
+use crate::action::{Action, ActionContext};
 use crate::agent::Agent;
 use crate::trade::TradeableItem;
 use crate::world::LocalFood;
@@ -103,6 +103,7 @@ impl LlmClient {
         agent: &Agent,
         world_perception: &str,
         local_food: &LocalFood,
+        context: &ActionContext,
         nearby_agents: &[(uuid::Uuid, &str)],
         epoch: usize,
         pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
@@ -113,12 +114,13 @@ impl LlmClient {
     ) -> Result<Action> {
         // If no API key, use heuristic
         if !self.is_available() {
-            return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed, mate_proposals));
+            return Ok(heuristic_action(agent, local_food, context, nearby_agents, pending_trades, debts_owed, mate_proposals));
         }
 
         let prompt = self.build_prompt(
             agent,
             world_perception,
+            context,
             nearby_agents,
             epoch,
             pending_trades,
@@ -131,7 +133,7 @@ impl LlmClient {
             Ok(response) => response,
             Err(e) => {
                 warn!("LLM call failed for {}: {}. Using heuristic.", agent.name(), e);
-                return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed, mate_proposals));
+                return Ok(heuristic_action(agent, local_food, context, nearby_agents, pending_trades, debts_owed, mate_proposals));
             }
         };
 
@@ -153,6 +155,7 @@ impl LlmClient {
         &self,
         agent: &Agent,
         world_perception: &str,
+        context: &ActionContext,
         nearby_agents: &[(uuid::Uuid, &str)],
         epoch: usize,
         pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
@@ -195,20 +198,11 @@ impl LlmClient {
         // Get tool-unlocked actions (already lowercase from unlocked_actions)
         let unlocked_actions = agent.physical.unlocked_actions();
 
-        // For now, empty craftable tools and structures (would need Registry access)
-        let craftable_tools = Vec::new();
-        let buildable_structures = Vec::new();
-
-        // Structure-related context (set during engine run)
-        let has_shelter = false;
-        let has_storage = false;
-        let owns_structure = false;
-        let is_sheltered = agent.physical.sheltered_at.is_some();
-
-        // Territory-related context (would be computed by engine)
-        let can_mark_territory = false; // Placeholder - engine should compute this
-        let trespassers: Vec<(uuid::Uuid, &str)> = Vec::new(); // Placeholder
-        let is_challenged = false; // Placeholder - engine should track pending challenges
+        let trespassers: Vec<(uuid::Uuid, &str)> = context
+            .trespassers
+            .iter()
+            .map(|(id, name)| (*id, name.as_str()))
+            .collect();
 
         // Build pending trade offers for action prompt (index, proposer_name, offer, request)
         let pending_offer_descs: Vec<(usize, &str, String, String)> = pending_trades
@@ -249,15 +243,15 @@ ACTION: GATHER"#,
                 nearby_agents,
                 &teachable_skills,
                 &unlocked_actions,
-                &craftable_tools,
-                &buildable_structures,
-                has_shelter,
-                has_storage,
-                owns_structure,
-                is_sheltered,
-                can_mark_territory,
+                &context.craftable_tools,
+                &context.buildable_structures,
+                context.has_shelter,
+                context.has_storage,
+                context.owns_structure,
+                context.is_sheltered,
+                context.can_mark_territory,
                 &trespassers,
-                is_challenged,
+                context.is_trespassing,
                 &pending_offer_descs,
                 my_proposals,
             ),
@@ -399,6 +393,7 @@ ACTION: GATHER"#,
 fn heuristic_action(
     agent: &Agent,
     local_food: &LocalFood,
+    context: &ActionContext,
     nearby_agents: &[(uuid::Uuid, &str)],
     pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
     debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
@@ -600,7 +595,36 @@ fn heuristic_action(
         return seek_food(agent, local_food, &mut rng);
     }
 
-    // Priority 5: Give food to nearby hungry agent if agreeable
+    // Priority 5: Shelter, building and tools
+    if context.has_shelter && !context.is_sheltered {
+        return Action::EnterShelter;
+    }
+    // Keep working on our own unfinished structure here
+    if context.owns_structure && !context.buildable_structures.is_empty() && rng.random::<f64>() < 0.7 {
+        return Action::Build { structure_type: context.buildable_structures[0] };
+    }
+    // Conscientious agents start a shelter when they have the materials
+    if agent.identity.personality.conscientiousness > 0.5 && rng.random::<f64>() < 0.3 {
+        use crate::structures::StructureType;
+        let preferred = [StructureType::Shelter, StructureType::LeanTo];
+        if let Some(structure_type) = preferred.iter().find(|s| context.buildable_structures.contains(s)) {
+            return Action::Build { structure_type: *structure_type };
+        }
+    }
+    // Craft a tool we don't have yet, preferring ones that unlock new ways to get food
+    if rng.random::<f64>() < 0.3 {
+        use crate::crafting::ToolType;
+        let preferred = [ToolType::WoodenSpear, ToolType::StoneAxe, ToolType::Rope];
+        let wanted = preferred
+            .iter()
+            .chain(context.craftable_tools.iter())
+            .find(|t| context.craftable_tools.contains(t) && !agent.physical.has_tool(**t));
+        if let Some(tool) = wanted {
+            return Action::Craft { tool: *tool };
+        }
+    }
+
+    // Priority 6: Give food to nearby hungry agent if agreeable
     if agent.identity.personality.agreeableness > 0.7
         && agent.physical.food > 5
         && !nearby_agents.is_empty()
@@ -609,7 +633,7 @@ fn heuristic_action(
         return Action::Give { target, amount: 1 };
     }
 
-    // Priority 6: Gossip if extraverted and have opinions to share
+    // Priority 7: Gossip if extraverted and have opinions to share
     if agent.identity.personality.extraversion > 0.5
         && nearby_agents.len() >= 2
         && rng.random::<f64>() < 0.3  // 30% chance
@@ -650,7 +674,7 @@ fn heuristic_action(
     let ready_to_mate = can_reproduce && agent.physical.food >= 5;
     let rested = agent.physical.energy > 0.4;
 
-    // Priority 7: Accept a mating proposal from someone we don't dislike
+    // Priority 8: Accept a mating proposal from someone we don't dislike
     // (resting first if too tired - proposals stay open for a few days)
     if ready_to_mate {
         let accepted = mate_proposals.iter().find(|(id, _)| {
@@ -665,7 +689,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 8: Propose mating once courtship with a nearby partner is strong
+    // Priority 9: Propose mating once courtship with a nearby partner is strong
     if ready_to_mate {
         let mate_candidate = agent.reproduction.courtship_progress.iter()
             .filter(|(id, score)| {
@@ -679,7 +703,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 9: Court - keep up an existing courtship (ours or one directed at us),
+    // Priority 10: Court - keep up an existing courtship (ours or one directed at us),
     // occasionally start a new one if sociable
     if can_reproduce && !nearby_agents.is_empty() {
         let current_partner = agent.reproduction.courtship_progress.iter()
@@ -711,7 +735,7 @@ fn heuristic_action(
         }
     }
 
-    // Priority 10: Teach if skilled and agreeable
+    // Priority 11: Teach if skilled and agreeable
     let teachable = agent.skills.teachable_skills();
     if !teachable.is_empty()
         && !nearby_agents.is_empty()
@@ -726,7 +750,7 @@ fn heuristic_action(
         return Action::Teach { target, skill };
     }
 
-    // Priority 11: Trade if we have materials and could use food (or vice versa)
+    // Priority 12: Trade if we have materials and could use food (or vice versa)
     if !nearby_agents.is_empty() && rng.random::<f64>() < 0.25 {
         // Check if we have excess materials to trade for food
         let total_materials: u32 = agent.physical.materials.values().sum();
@@ -794,7 +818,7 @@ fn heuristic_action(
 }
 
 /// Gather if there is food here; otherwise step toward the richest visible cell,
-/// then toward the most recently remembered food location, else explore randomly
+/// then toward the most recently remembered food location, else hunt (if armed) or explore
 fn seek_food(agent: &Agent, local_food: &LocalFood, rng: &mut impl rand::RngExt) -> Action {
     use crate::action::Direction;
 
@@ -821,6 +845,11 @@ fn seek_food(agent: &Agent, local_food: &LocalFood, rng: &mut impl rand::RngExt)
 
     if let Some(dir) = target.and_then(|t| Direction::toward(pos, t)) {
         return Action::Move(dir);
+    }
+
+    // Nothing in sight or remembered: hunt if armed, otherwise explore
+    if agent.physical.has_tool(crate::crafting::ToolType::WoodenSpear) && rng.random::<f64>() < 0.5 {
+        return Action::Hunt;
     }
 
     let directions = [

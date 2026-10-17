@@ -5,6 +5,26 @@ use crate::crafting::{MaterialType, ToolType};
 use crate::structures::StructureType;
 use crate::trade::TradeableItem;
 
+/// Situation-dependent actions an agent can take this epoch, computed by the
+/// engine with the same checks the action handlers apply
+#[derive(Debug, Clone, Default)]
+pub struct ActionContext {
+    pub craftable_tools: Vec<ToolType>,
+    pub buildable_structures: Vec<StructureType>,
+    /// A complete shelter here that this agent may use
+    pub has_shelter: bool,
+    /// A complete storage here that this agent may use
+    pub has_storage: bool,
+    /// This agent owns the structure here
+    pub owns_structure: bool,
+    pub is_sheltered: bool,
+    pub can_mark_territory: bool,
+    /// Agents standing on this agent's territory without permission
+    pub trespassers: Vec<(Uuid, String)>,
+    /// This agent is standing on someone else's territory without permission
+    pub is_trespassing: bool,
+}
+
 /// Actions an agent can take
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Action {
