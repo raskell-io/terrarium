@@ -31,6 +31,15 @@ pub struct World {
     pub epoch: usize,
 }
 
+/// Food an agent can see from its position
+#[derive(Debug, Clone, Default)]
+pub struct LocalFood {
+    /// Food on the agent's own cell
+    pub here: u32,
+    /// Adjacent cells with food: (x, y, amount)
+    pub adjacent: Vec<(usize, usize, u32)>,
+}
+
 /// A single cell in the grid
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cell {
@@ -206,6 +215,19 @@ impl World {
                 }
             })
         })
+    }
+
+    /// Structured view of visible food (current cell + 8 adjacent), for non-LLM decision making
+    pub fn local_food(&self, x: usize, y: usize) -> LocalFood {
+        LocalFood {
+            here: self.get(x, y).map(|c| c.food).unwrap_or(0),
+            adjacent: self
+                .adjacent(x, y)
+                .iter()
+                .filter(|c| c.food > 0)
+                .map(|c| (c.x, c.y, c.food))
+                .collect(),
+        }
     }
 
     /// Get a summary of visible area for an agent

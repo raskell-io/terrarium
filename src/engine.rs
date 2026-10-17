@@ -390,6 +390,7 @@ impl Engine {
             // Get perception (world + environment)
             let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
             let perception = format!("{}\n{}", env_perception, world_perception);
+            let local_food = self.world.local_food(agent.physical.x, agent.physical.y);
 
             // Get nearby agents
             let nearby: Vec<(Uuid, &str)> = self
@@ -463,6 +464,7 @@ impl Engine {
                 .decide_action(
                     agent,
                     &perception,
+                    &local_food,
                     &nearby,
                     epoch,
                     &pending_trades,

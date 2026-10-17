@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 use crate::action::Action;
 use crate::agent::Agent;
 use crate::trade::TradeableItem;
+use crate::world::LocalFood;
 
 /// LLM client configuration
 #[derive(Debug, Clone, Deserialize)]
@@ -81,6 +82,7 @@ impl LlmClient {
         &self,
         agent: &Agent,
         world_perception: &str,
+        local_food: &LocalFood,
         nearby_agents: &[(uuid::Uuid, &str)],
         epoch: usize,
         pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
@@ -90,7 +92,7 @@ impl LlmClient {
     ) -> Result<Action> {
         // If no API key, use heuristic
         if !self.is_available() {
-            return Ok(heuristic_action(agent, nearby_agents, pending_trades, debts_owed));
+            return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed));
         }
 
         let prompt = self.build_prompt(
@@ -348,6 +350,7 @@ ACTION: GATHER"#,
 /// debts_owed: Vec of (creditor_id, creditor_name, service_description, deadline_in) for debts the agent owes
 fn heuristic_action(
     agent: &Agent,
+    local_food: &LocalFood,
     nearby_agents: &[(uuid::Uuid, &str)],
     pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
     debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
@@ -524,9 +527,9 @@ fn heuristic_action(
         return Action::Rest;
     }
 
-    // Priority 3: Gather if low on food
+    // Priority 3: Find food if running low
     if agent.physical.food < 3 {
-        return Action::Gather;
+        return seek_food(agent, local_food, &mut rng);
     }
 
     // Priority 4: Give food to nearby hungry agent if agreeable
@@ -693,11 +696,54 @@ fn heuristic_action(
             ];
             Action::Move(directions[rng.random_range(0..8)])
         }
-        5..=6 => Action::Gather,
+        5..=6 => seek_food(agent, local_food, &mut rng),
         7..=8 => Action::GatherMaterials, // Gather wood, stone, etc.
         9 => Action::Rest,
         _ => Action::Wait,
     }
+}
+
+/// Gather if there is food here; otherwise step toward the richest visible cell,
+/// then toward the most recently remembered food location, else explore randomly
+fn seek_food(agent: &Agent, local_food: &LocalFood, rng: &mut impl rand::RngExt) -> Action {
+    use crate::action::Direction;
+
+    if local_food.here > 0 {
+        return Action::Gather;
+    }
+
+    let pos = (agent.physical.x, agent.physical.y);
+    let target = local_food
+        .adjacent
+        .iter()
+        .max_by_key(|(_, _, amount)| *amount)
+        .map(|(x, y, _)| (*x, *y))
+        .or_else(|| {
+            agent
+                .beliefs
+                .world
+                .food_locations
+                .iter()
+                .filter(|loc| loc.belief.amount > 0 && (loc.x, loc.y) != pos)
+                .max_by_key(|loc| loc.belief.last_seen_epoch)
+                .map(|loc| (loc.x, loc.y))
+        });
+
+    if let Some(dir) = target.and_then(|t| Direction::toward(pos, t)) {
+        return Action::Move(dir);
+    }
+
+    let directions = [
+        Direction::North,
+        Direction::South,
+        Direction::East,
+        Direction::West,
+        Direction::NorthEast,
+        Direction::NorthWest,
+        Direction::SouthEast,
+        Direction::SouthWest,
+    ];
+    Action::Move(directions[rng.random_range(0..8)])
 }
 
 impl Default for LlmConfig {

@@ -115,6 +115,23 @@ impl Direction {
         }
     }
 
+    /// Direction of a single step from one cell toward another (None if same cell)
+    pub fn toward(from: (usize, usize), to: (usize, usize)) -> Option<Self> {
+        let dx = (to.0 as i32 - from.0 as i32).signum();
+        let dy = (to.1 as i32 - from.1 as i32).signum();
+        match (dx, dy) {
+            (0, -1) => Some(Direction::North),
+            (0, 1) => Some(Direction::South),
+            (1, 0) => Some(Direction::East),
+            (-1, 0) => Some(Direction::West),
+            (1, -1) => Some(Direction::NorthEast),
+            (-1, -1) => Some(Direction::NorthWest),
+            (1, 1) => Some(Direction::SouthEast),
+            (-1, 1) => Some(Direction::SouthWest),
+            _ => None,
+        }
+    }
+
     /// Get direction name for display
     pub fn name(&self) -> &'static str {
         match self {
@@ -795,6 +812,22 @@ fn parse_material_type(s: &str) -> Option<MaterialType> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_direction_toward() {
+        assert!(matches!(Direction::toward((5, 5), (5, 0)), Some(Direction::North)));
+        assert!(matches!(Direction::toward((5, 5), (9, 9)), Some(Direction::SouthEast)));
+        assert!(matches!(Direction::toward((5, 5), (0, 6)), Some(Direction::SouthWest)));
+        assert!(Direction::toward((3, 3), (3, 3)).is_none());
+        // Every non-zero step must move the agent closer
+        for to in [(0, 0), (9, 0), (0, 9), (4, 7)] {
+            let (dx, dy) = Direction::toward((4, 4), to).map(|d| d.delta()).unwrap_or((0, 0));
+            let (nx, ny) = (4 + dx, 4 + dy);
+            let before = (4 - to.0 as i32).abs().max((4 - to.1 as i32).abs());
+            let after = (nx - to.0 as i32).abs().max((ny - to.1 as i32).abs());
+            assert!(after < before || before == 0);
+        }
+    }
 
     #[test]
     fn test_parse_simple_actions() {
