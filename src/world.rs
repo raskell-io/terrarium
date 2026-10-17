@@ -594,8 +594,14 @@ impl World {
         }
     }
 
-    /// Get a summary of visible area for an agent
-    pub fn perception_summary(&self, x: usize, y: usize) -> String {
+    /// Cells within `radius` steps of (x, y), including it
+    pub fn visible_cells(&self, x: usize, y: usize, radius: usize) -> impl Iterator<Item = &Cell> {
+        self.cells.iter().filter(move |c| c.x.abs_diff(x) <= radius && c.y.abs_diff(y) <= radius)
+    }
+
+    /// What an agent sees: its own and adjacent cells in full, and anything notable further out
+    /// within `radius` (good food, water, structures, game, claimed land)
+    pub fn perception_summary(&self, x: usize, y: usize, radius: usize) -> String {
         let current = self.describe_cell(x, y);
         let adjacent: Vec<String> = self
             .adjacent(x, y)
@@ -606,14 +612,20 @@ impl World {
                 format!("{}: {}", dir, desc)
             })
             .collect();
+        let distant: Vec<String> = self
+            .visible_cells(x, y, radius)
+            .filter(|c| c.x.abs_diff(x).max(c.y.abs_diff(y)) >= 2)
+            .filter(|c| {
+                c.food > 5 || c.terrain == Terrain::Water || c.structure.is_some() || c.territory.is_some() || c.game >= 1.5
+            })
+            .map(|c| format!("{} {}: {}", c.x.abs_diff(x).max(c.y.abs_diff(y)), compass(x, y, c.x, c.y), self.describe_cell(c.x, c.y)))
+            .collect();
 
-        format!(
-            "You are at ({}, {}): {}\nNearby: {}",
-            x,
-            y,
-            current,
-            adjacent.join("; ")
-        )
+        let mut summary = format!("You are at ({}, {}): {}\nNearby: {}", x, y, current, adjacent.join("; "));
+        if !distant.is_empty() {
+            summary.push_str(&format!("\nFurther off (cells away, direction): {}", distant.join("; ")));
+        }
+        summary
     }
 }
 
@@ -624,6 +636,12 @@ impl Cell {
         self.food -= taken;
         taken
     }
+}
+
+/// Compass direction from one cell toward another at any distance
+pub fn compass(from_x: usize, from_y: usize, to_x: usize, to_y: usize) -> &'static str {
+    let step = |a: usize, b: usize| (1 + (b as i64 - a as i64).signum()) as usize;
+    direction_name(1, 1, step(from_x, to_x), step(from_y, to_y))
 }
 
 fn direction_name(from_x: usize, from_y: usize, to_x: usize, to_y: usize) -> &'static str {
@@ -768,6 +786,30 @@ mod tests {
             let (lx, ly) = world.nearest_land(x, y);
             assert!(world.walkable(lx, ly));
         }
+    }
+
+    #[test]
+    fn test_agents_see_notable_things_further_off() {
+        let config = WorldConfig {
+            width: 10,
+            height: 10,
+            fertile_fraction: 0.0,
+            initial_food_per_fertile: 10,
+            food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig { game_per_barren: 0.0, ..WildlifeConfig::default() },
+            water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+        };
+        let mut world = World::new(&config);
+        world.get_mut(7, 3).unwrap().terrain = Terrain::Water;
+        world.get_mut(5, 7).unwrap().food = 12;
+
+        let seen = world.perception_summary(5, 5, 2);
+        assert!(seen.contains("2 NE: a lake"), "{}", seen);
+        assert!(seen.contains("2 S: barren land with abundant food"), "{}", seen);
+        assert!(!world.perception_summary(5, 5, 1).contains("Further off"));
+        assert_eq!(compass(5, 5, 2, 9), "SW");
+        assert_eq!(compass(5, 5, 5, 0), "N");
     }
 
     #[test]

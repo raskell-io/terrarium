@@ -230,19 +230,28 @@ impl Beliefs {
     pub fn prompt_summary(&self, current_epoch: usize) -> String {
         let mut parts = Vec::new();
 
-        // World beliefs
-        let food_beliefs: Vec<String> = self
+        // World beliefs: recent places believed to hold food, richest first
+        let mut known: Vec<_> = self
             .world
             .food_locations
             .iter()
-            .filter(|loc| current_epoch.saturating_sub(loc.belief.last_seen_epoch) < 10) // Recent beliefs
+            .filter(|loc| loc.belief.amount > 0)
+            .filter(|loc| current_epoch.saturating_sub(loc.belief.last_seen_epoch) < 10)
+            .collect();
+        known.sort_by_key(|loc| std::cmp::Reverse(loc.belief.amount));
+        let food_beliefs: Vec<String> = known
+            .iter()
+            .take(5)
             .map(|loc| {
-                let freshness = if current_epoch == loc.belief.last_seen_epoch {
-                    "just saw"
-                } else {
-                    "remember"
+                let amount = match loc.belief.amount {
+                    11.. => "plenty of",
+                    6..=10 => "some",
+                    _ => "a little",
                 };
-                format!("I {} food at ({}, {})", freshness, loc.x, loc.y)
+                match current_epoch.saturating_sub(loc.belief.last_seen_epoch) {
+                    0 => format!("I see {} food at ({}, {})", amount, loc.x, loc.y),
+                    days => format!("I saw {} food at ({}, {}) {} days ago", amount, loc.x, loc.y, days),
+                }
             })
             .collect();
 

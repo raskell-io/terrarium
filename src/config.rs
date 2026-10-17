@@ -45,6 +45,9 @@ pub struct AgentsConfig {
     /// Fraction of carried food that spoils each epoch (food in storage keeps)
     #[serde(default = "default_food_spoilage")]
     pub food_spoilage: f64,
+    /// How many cells away agents can see (interaction still needs adjacency)
+    #[serde(default = "default_view_radius")]
+    pub view_radius: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -288,6 +291,10 @@ fn default_renege_trust_penalty() -> f64 { 0.5 }
 fn default_fulfill_trust_bonus() -> f64 { 0.15 }
 fn default_promise_deadline() -> usize { 20 }
 
+fn default_view_radius() -> usize {
+    2
+}
+
 fn default_food_spoilage() -> f64 {
     0.05
 }
@@ -336,6 +343,7 @@ impl Default for Config {
                 personality: "random".to_string(),
                 starting_age: None,
                 food_spoilage: default_food_spoilage(),
+                view_radius: default_view_radius(),
             },
             simulation: SimulationConfig {
                 epochs: 100,

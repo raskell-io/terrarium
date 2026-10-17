@@ -402,7 +402,23 @@ impl Engine {
             }
 
             // Get perception (world + environment)
-            let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
+            let radius = self.config.agents.view_radius;
+            let mut world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y, radius);
+            // People are visible from afar; talking, giving or fighting still needs adjacency
+            let distant: Vec<String> = self
+                .agents
+                .iter()
+                .filter(|a| a.is_alive() && !is_adjacent(a, agent))
+                .filter(|a| a.physical.x.abs_diff(agent.physical.x).max(a.physical.y.abs_diff(agent.physical.y)) <= radius)
+                .map(|a| {
+                    let (ax, ay) = (a.physical.x, a.physical.y);
+                    let d = ax.abs_diff(agent.physical.x).max(ay.abs_diff(agent.physical.y));
+                    format!("{} ({} {})", a.name(), d, crate::world::compass(agent.physical.x, agent.physical.y, ax, ay))
+                })
+                .collect();
+            if !distant.is_empty() {
+                world_perception.push_str(&format!("\nIn the distance: {}", distant.join(", ")));
+            }
             let perception = format!("{}\n{}", env_perception, world_perception);
             let local_food = self.world.local_food(agent.physical.x, agent.physical.y);
             let action_context = self.action_context(agent);
@@ -2476,16 +2492,15 @@ impl Engine {
 
             let pos = (agent.physical.x, agent.physical.y);
 
-            // Update food location beliefs based on current perception
-            if let Some(cell) = self.world.get(pos.0, pos.1) {
-                if cell.food > 0 {
-                    agent.beliefs.update_food_belief(
-                        pos.0,
-                        pos.1,
-                        cell.food,
-                        epoch,
-                    );
+            // Everything in view updates what the agent believes about food there, including
+            // that it has run out; places out of sight keep their (possibly stale) beliefs
+            for seen in self.world.visible_cells(pos.0, pos.1, self.config.agents.view_radius) {
+                if seen.food > 0 || agent.beliefs.world.food_locations.iter().any(|b| (b.x, b.y) == (seen.x, seen.y)) {
+                    agent.beliefs.update_food_belief(seen.x, seen.y, seen.food, epoch);
                 }
+            }
+
+            if let Some(cell) = self.world.get(pos.0, pos.1) {
 
                 // Update territory beliefs based on current perception
                 if let Some(ref territory) = cell.territory {
@@ -4145,6 +4160,21 @@ mod tests {
         let food = engine.agents[0].physical.food;
         engine.resolve_actions(50, HashMap::from([(a, Action::Fish)])).unwrap();
         assert_eq!(engine.agents[0].physical.food, food);
+    }
+
+    #[test]
+    fn test_seeing_an_emptied_patch_corrects_the_belief() {
+        let (mut engine, _, _) = courting_pair("belief");
+        engine.agents[0].beliefs.update_food_belief(6, 7, 9, 0);
+        engine.world.get_mut(6, 7).unwrap().food = 0;
+        engine.world.get_mut(3, 3).unwrap().food = 8;
+        engine.update_beliefs(1);
+        let belief = |x, y| {
+            engine.agents[0].beliefs.world.food_locations.iter().find(|b| (b.x, b.y) == (x, y)).map(|b| b.belief.amount)
+        };
+        assert_eq!(belief(6, 7), Some(0), "within view: the agent sees it's gone");
+        assert_eq!(belief(3, 3), Some(8), "2 cells away is still in view");
+        assert_eq!(belief(9, 9), None, "out of view: nothing learned");
     }
 
     #[test]
