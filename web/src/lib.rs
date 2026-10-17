@@ -2,7 +2,8 @@
 //!
 //! The same TUI as `terrarium --tui` (its app state, drawing and key handling), rendered into
 //! the page by Ratzilla's WebGL2 backend and driven by the engine compiled to WebAssembly. The world comes from
-//! the page's `#hash` (a bundled scenario id); W switches world, R starts it over.
+//! the page's `#hash` (a bundled scenario id); W switches world, R starts it over. With
+//! `?embed` in the address it draws smaller type, for a frame inside another page.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -143,8 +144,12 @@ pub fn start() -> Result<(), JsValue> {
 
     // WebGL2 resizes cleanly with the window (the DOM backend panics when its grid shrinks)
     // and draws the page's own font
+    // Smaller type when embedded in another page (?embed), so a small frame still fits the panels
+    let embedded = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .is_some_and(|q| q.contains("embed"));
     let options = WebGl2BackendOptions::new()
-        .font_atlas_config(FontAtlasConfig::dynamic(&["JetBrains Mono"], 16.0))
+        .font_atlas_config(FontAtlasConfig::dynamic(&["JetBrains Mono"], if embedded { 13.0 } else { 16.0 }))
         .canvas_padding_color(terrarium::tui::theme::BG);
     let backend = WebGl2Backend::new_with_options(options).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let mut terminal = Terminal::new(backend).map_err(|e| JsValue::from_str(&e.to_string()))?;

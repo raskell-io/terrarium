@@ -1,0 +1,45 @@
+# Build the browser viewer and publish it for terrarium.raskell.io
+name: Web build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # web-latest release
+
+concurrency:
+  group: web
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl -fsSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh || cargo install wasm-pack --locked
+      - name: Build
+        run: web/build.sh
+      # terrarium.raskell.io serves this build at /play/: its Cloudflare Pages build downloads
+      # the web-latest release, and the deploy hook makes it rebuild with the new viewer
+      - name: Publish as the web-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -czf terrarium-web.tar.gz -C web index.html pkg/terrarium_web.js pkg/terrarium_web_bg.wasm
+          gh release view web-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create web-latest --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "Web build (latest)" --notes "The latest browser (WebAssembly) build from main, served at https://terrarium.raskell.io/play/"
+          gh release upload web-latest terrarium-web.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Redeploy terrarium.raskell.io
+        env:
+          PAGES_DEPLOY_HOOK: ${{ secrets.PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$PAGES_DEPLOY_HOOK" ]; then curl -fsS -X POST "$PAGES_DEPLOY_HOOK" >/dev/null
+          else echo "PAGES_DEPLOY_HOOK is not set; the website keeps its current viewer build"; fi

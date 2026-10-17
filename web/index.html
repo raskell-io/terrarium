@@ -30,16 +30,20 @@
   <script type="module">
     import init from "./pkg/terrarium_web.js";
     // The terminal is drawn in JetBrains Mono, so have the font ready before it starts
-    document.fonts.load('16px "JetBrains Mono"')
+    document.fonts.load('16px "JetBrains Mono"').then(() => document.fonts.load('13px "JetBrains Mono"'))
       .catch(() => {})
       .then(() => init())
       .then(() => {
         // Ratzilla listens for keys on its canvas, so keep it focused: now, and after any click
         const grid = document.querySelector("canvas");
         const focus = () => grid && grid.focus({ preventScroll: true });
-        focus();
         document.addEventListener("click", focus);
-        window.addEventListener("focus", focus);
+        // Embedded in another page (the website's home), take the keyboard only when clicked,
+        // so Space and the arrow keys keep scrolling the page around it
+        if (window.self === window.top) {
+          focus();
+          window.addEventListener("focus", focus);
+        }
       })
       .catch((e) => {
         document.body.textContent = "Terrarium could not start: " + e;
