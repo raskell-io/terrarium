@@ -100,7 +100,7 @@ impl Default for ReproductionConfig {
             gestation_energy_drain: 0.02,
             courtship_threshold: 0.7,
             courtship_increment: 0.15,
-            courtship_decay: 0.05,
+            courtship_decay: 0.02,
             mating_cooldown: 20,
             offspring_starting_food: 5,
             min_health_to_reproduce: 0.5,
@@ -115,7 +115,7 @@ fn default_mating_food_cost() -> u32 { 5 }
 fn default_gestation_energy_drain() -> f64 { 0.02 }
 fn default_courtship_threshold() -> f64 { 0.7 }
 fn default_courtship_increment() -> f64 { 0.15 }
-fn default_courtship_decay() -> f64 { 0.05 }
+fn default_courtship_decay() -> f64 { 0.02 }
 fn default_mating_cooldown() -> usize { 20 }
 fn default_offspring_starting_food() -> u32 { 5 }
 fn default_min_health_to_reproduce() -> f64 { 0.5 }

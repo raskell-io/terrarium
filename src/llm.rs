@@ -109,10 +109,11 @@ impl LlmClient {
         debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
         credits_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
         my_proposals: usize,
+        mate_proposals: &[(uuid::Uuid, &str)],
     ) -> Result<Action> {
         // If no API key, use heuristic
         if !self.is_available() {
-            return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed));
+            return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed, mate_proposals));
         }
 
         let prompt = self.build_prompt(
@@ -124,12 +125,13 @@ impl LlmClient {
             debts_owed,
             credits_owed,
             my_proposals,
+            mate_proposals,
         );
         let response = match self.call_api(&prompt).await {
             Ok(response) => response,
             Err(e) => {
                 warn!("LLM call failed for {}: {}. Using heuristic.", agent.name(), e);
-                return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed));
+                return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed, mate_proposals));
             }
         };
 
@@ -157,6 +159,7 @@ impl LlmClient {
         debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
         credits_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
         my_proposals: usize,
+        mate_proposals: &[(uuid::Uuid, &str)],
     ) -> String {
         let nearby_list: Vec<String> = nearby_agents
             .iter()
@@ -170,12 +173,21 @@ impl LlmClient {
         };
 
         // Build trade context section
-        let trade_context = self.build_trade_context(
+        let mut trade_context = self.build_trade_context(
             pending_trades,
             debts_owed,
             credits_owed,
             epoch,
         );
+        if !mate_proposals.is_empty() {
+            trade_context.push_str("\n## Proposals\n");
+            for (_, name) in mate_proposals {
+                trade_context.push_str(&format!(
+                    "- **{}** wants to have a child with you. Reply MATE {} to accept within a few days, or ignore it to decline.\n",
+                    name, name
+                ));
+            }
+        }
 
         // Get teachable skills for action prompt
         let teachable_skills = agent.skills.teachable_skills();
@@ -390,6 +402,7 @@ fn heuristic_action(
     nearby_agents: &[(uuid::Uuid, &str)],
     pending_trades: &[(usize, uuid::Uuid, &str, String, String, Option<usize>)],
     debts_owed: &[(uuid::Uuid, &str, String, Option<usize>)],
+    mate_proposals: &[(uuid::Uuid, &str)],
 ) -> Action {
     use rand::RngExt;
     let mut rng = rand::rng();
@@ -611,53 +624,75 @@ fn heuristic_action(
         }
     }
 
-    // Priority 6: Court if extraverted/agreeable and conditions are right
-    if (agent.identity.personality.extraversion > 0.5 || agent.identity.personality.agreeableness > 0.5)
-        && !nearby_agents.is_empty()
-        && agent.reproduction.mating_cooldown == 0
+    // Courting is free; mating additionally needs energy and food
+    let can_reproduce = agent.reproduction.mating_cooldown == 0
         && agent.reproduction.gestation.is_none()
-        && agent.physical.health > 0.5
-        && agent.physical.energy > 0.4
-        && rng.random::<f64>() < 0.2  // 20% chance
-    {
-        // Find someone we have positive feelings about or a stranger
-        let potential_partners: Vec<_> = nearby_agents.iter()
-            .filter(|(id, _)| {
-                agent.beliefs.social.get(id)
-                    .map(|b| b.sentiment >= 0.0)  // Not hostile
-                    .unwrap_or(true)  // Or unknown
-            })
-            .collect();
+        && agent.physical.health > 0.5;
+    let ready_to_mate = can_reproduce && agent.physical.food >= 5;
+    let rested = agent.physical.energy > 0.4;
 
-        if !potential_partners.is_empty() {
-            let (target, _) = potential_partners[rng.random_range(0..potential_partners.len())];
-            return Action::Court { target: *target };
+    // Priority 6: Accept a mating proposal from someone we don't dislike
+    // (resting first if too tired - proposals stay open for a few days)
+    if ready_to_mate {
+        let accepted = mate_proposals.iter().find(|(id, _)| {
+            agent.beliefs.social.get(id).map(|b| b.sentiment >= 0.0).unwrap_or(true)
+        });
+        if let Some((proposer, name)) = accepted {
+            if !rested {
+                return Action::Rest;
+            }
+            debug!("Heuristic: accepting mating proposal from {}", name);
+            return Action::Mate { target: *proposer };
         }
     }
 
-    // Priority 7: Try to mate if courtship is high enough
-    if !nearby_agents.is_empty()
-        && agent.reproduction.mating_cooldown == 0
-        && agent.reproduction.gestation.is_none()
-        && agent.physical.health > 0.5
-        && agent.physical.energy > 0.4
-        && agent.physical.food >= 5  // Need food for mating
-    {
-        // Find someone with high courtship score
+    // Priority 7: Propose mating once courtship with a nearby partner is strong
+    if ready_to_mate {
         let mate_candidate = agent.reproduction.courtship_progress.iter()
             .filter(|(id, score)| {
-                **score >= 0.7  // Threshold met
-                    && nearby_agents.iter().any(|(nid, _)| nid == *id)  // Is nearby
+                **score >= 0.7 && nearby_agents.iter().any(|(nid, _)| nid == *id)
             })
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(id, _)| *id);
 
         if let Some(target) = mate_candidate {
-            return Action::Mate { target };
+            return if rested { Action::Mate { target } } else { Action::Rest };
         }
     }
 
-    // Priority 8: Teach if skilled and agreeable
+    // Priority 8: Court - keep up an existing courtship (ours or one directed at us),
+    // occasionally start a new one if sociable
+    if can_reproduce && !nearby_agents.is_empty() {
+        let current_partner = agent.reproduction.courtship_progress.iter()
+            .filter(|(id, _)| nearby_agents.iter().any(|(nid, _)| nid == *id))
+            .filter(|(id, _)| agent.beliefs.social.get(id).map(|b| b.sentiment >= 0.0).unwrap_or(true))
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(id, _)| *id);
+
+        if let Some(target) = current_partner {
+            if rng.random::<f64>() < 0.6 {
+                return Action::Court { target };
+            }
+        } else if (agent.identity.personality.extraversion > 0.5
+            || agent.identity.personality.agreeableness > 0.5)
+            && rng.random::<f64>() < 0.2
+        {
+            let potential_partners: Vec<_> = nearby_agents.iter()
+                .filter(|(id, _)| {
+                    agent.beliefs.social.get(id)
+                        .map(|b| b.sentiment >= 0.0)  // Not hostile
+                        .unwrap_or(true)  // Or unknown
+                })
+                .collect();
+
+            if !potential_partners.is_empty() {
+                let (target, _) = potential_partners[rng.random_range(0..potential_partners.len())];
+                return Action::Court { target: *target };
+            }
+        }
+    }
+
+    // Priority 9: Teach if skilled and agreeable
     let teachable = agent.skills.teachable_skills();
     if !teachable.is_empty()
         && !nearby_agents.is_empty()
@@ -672,7 +707,7 @@ fn heuristic_action(
         return Action::Teach { target, skill };
     }
 
-    // Priority 9: Trade if we have materials and could use food (or vice versa)
+    // Priority 10: Trade if we have materials and could use food (or vice versa)
     if !nearby_agents.is_empty() && rng.random::<f64>() < 0.25 {
         // Check if we have excess materials to trade for food
         let total_materials: u32 = agent.physical.materials.values().sum();

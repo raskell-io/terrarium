@@ -36,7 +36,12 @@ pub struct Engine {
     recipe_registry: RecipeRegistry,
     /// Trade system state
     trade_state: TradeState,
+    /// Open mating proposals: proposer -> (target, last epoch the target can accept)
+    mate_proposals: HashMap<Uuid, (Uuid, usize)>,
 }
+
+/// Days a mating proposal stays open for the other agent to accept
+const MATE_PROPOSAL_DAYS: usize = 3;
 
 impl Engine {
     /// Create a new simulation engine
@@ -86,6 +91,7 @@ impl Engine {
             pending_births: Vec::new(),
             recipe_registry: RecipeRegistry::new(),
             trade_state: TradeState::new(),
+            mate_proposals: HashMap::new(),
         })
     }
 
@@ -453,6 +459,14 @@ impl Engine {
                 })
                 .collect();
 
+            // Nearby agents with an open mating proposal to this agent
+            let mate_proposals: Vec<(Uuid, &str)> = self
+                .mate_proposals
+                .iter()
+                .filter(|(_, (target, expires))| *target == agent.id && *expires >= epoch)
+                .filter_map(|(proposer, _)| nearby.iter().find(|(id, _)| id == proposer).copied())
+                .collect();
+
             // Count this agent's pending proposals (to show in actions prompt)
             let my_proposals = self
                 .trade_state
@@ -474,6 +488,7 @@ impl Engine {
                     &debts_owed,
                     &credits_owed,
                     my_proposals,
+                    &mate_proposals,
                 )
                 .await?;
 
@@ -2752,6 +2767,14 @@ impl Engine {
         }
     }
 
+    fn agent_name(&self, id: Uuid) -> String {
+        self.agents
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.name().to_string())
+            .unwrap_or_else(|| "someone".to_string())
+    }
+
     /// Resolve mating actions - requires mutual consent
     fn resolve_mating(&mut self, epoch: usize, actions: &HashMap<Uuid, Action>) -> Result<()> {
         if !self.config.reproduction.enabled {
@@ -2770,39 +2793,79 @@ impl Engine {
             })
             .collect();
 
-        // Check for mutual consent pairs
-        let mut processed: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+        // Mating needs consent from both: either both choose MATE this epoch, or
+        // one accepts the other's still-open proposal from an earlier epoch
+        let mut matched: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
 
         for (agent_a, target_a) in &mate_actions {
-            if processed.contains(agent_a) {
+            if matched.contains(agent_a) {
                 continue;
             }
 
-            // Check if target is also trying to mate with agent_a
-            let mutual = mate_actions
+            let same_epoch = mate_actions
                 .iter()
                 .any(|(agent_b, target_b)| agent_b == target_a && target_b == agent_a);
+            let accepts_open_proposal = self
+                .mate_proposals
+                .get(target_a)
+                .is_some_and(|(target, expires)| target == agent_a && *expires >= epoch);
 
-            if mutual {
+            if same_epoch || accepts_open_proposal {
+                matched.insert(*agent_a);
+                matched.insert(*target_a);
+                self.mate_proposals.remove(agent_a);
+                self.mate_proposals.remove(target_a);
                 self.attempt_mating(epoch, *agent_a, *target_a)?;
-                processed.insert(*agent_a);
-                processed.insert(*target_a);
-            } else {
-                // One-sided - rejection
-                if let Some(agent_idx) = self.agents.iter().position(|a| a.id == *agent_a) {
-                    let target_name = self.agents
-                        .iter()
-                        .find(|a| a.id == *target_a)
-                        .map(|a| a.name().to_string())
-                        .unwrap_or_else(|| "someone".to_string());
+                continue;
+            }
 
-                    self.agents[agent_idx].memory.remember(Episode::social(
+            // Otherwise this is a proposal the target can accept in the coming days
+            let is_new = self
+                .mate_proposals
+                .get(agent_a)
+                .is_none_or(|(target, _)| target != target_a);
+            self.mate_proposals
+                .insert(*agent_a, (*target_a, epoch + MATE_PROPOSAL_DAYS));
+
+            if is_new {
+                let proposer_name = self.agent_name(*agent_a);
+                let target_name = self.agent_name(*target_a);
+                if let Some(idx) = self.agents.iter().position(|a| a.id == *agent_a) {
+                    self.agents[idx].memory.remember(Episode::social(
                         epoch,
-                        &format!("{} wasn't interested in mating", target_name),
-                        -0.1,
+                        &format!("I asked {} to have a child with me", target_name),
+                        0.1,
                         *target_a,
                     ));
                 }
+                if let Some(idx) = self.agents.iter().position(|a| a.id == *target_a) {
+                    self.agents[idx].memory.remember(Episode::social(
+                        epoch,
+                        &format!("{} asked me to have a child with them", proposer_name),
+                        0.15,
+                        *agent_a,
+                    ));
+                }
+            }
+        }
+
+        // Expire proposals that went unanswered
+        let expired: Vec<(Uuid, Uuid)> = self
+            .mate_proposals
+            .iter()
+            .filter(|(_, (_, expires))| *expires <= epoch)
+            .map(|(proposer, (target, _))| (*proposer, *target))
+            .collect();
+        for (proposer, target) in expired {
+            self.mate_proposals.remove(&proposer);
+            let target_name = self.agent_name(target);
+            if let Some(idx) = self.agents.iter().position(|a| a.id == proposer) {
+                self.agents[idx].memory.remember(Episode::social(
+                    epoch,
+                    &format!("{} wasn't interested in having a child with me", target_name),
+                    -0.1,
+                    target,
+                ));
             }
         }
 
@@ -2824,47 +2887,47 @@ impl Engine {
 
         // Check adjacency
         if !is_adjacent(&self.agents[idx_a], &self.agents[idx_b]) {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "not adjacent");
         }
 
         // Check if both are alive
         if !self.agents[idx_a].is_alive() || !self.agents[idx_b].is_alive() {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "partner not alive");
         }
 
         // Check health requirements
         if self.agents[idx_a].physical.health < config.min_health_to_reproduce
             || self.agents[idx_b].physical.health < config.min_health_to_reproduce
         {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "health too low");
         }
 
         // Check energy requirements
         if self.agents[idx_a].physical.energy < config.min_energy_to_reproduce
             || self.agents[idx_b].physical.energy < config.min_energy_to_reproduce
         {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "energy too low");
         }
 
         // Check food requirements
         if self.agents[idx_a].physical.food < config.mating_food_cost
             || self.agents[idx_b].physical.food < config.mating_food_cost
         {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "not enough food");
         }
 
         // Check mating cooldowns
         if self.agents[idx_a].reproduction.mating_cooldown > 0
             || self.agents[idx_b].reproduction.mating_cooldown > 0
         {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "mating cooldown");
         }
 
         // Check if either is already gestating
         if self.agents[idx_a].reproduction.gestation.is_some()
             || self.agents[idx_b].reproduction.gestation.is_some()
         {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "already expecting");
         }
 
         // Check courtship threshold (average of both scores)
@@ -2883,7 +2946,7 @@ impl Engine {
         let avg_score = (score_a + score_b) / 2.0;
 
         if avg_score < config.courtship_threshold {
-            return Ok(());
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "courtship below threshold");
         }
 
         // All checks passed - proceed with mating!
@@ -3589,8 +3652,77 @@ fn manhattan_distance(a: (usize, usize), b: (usize, usize)) -> usize {
 }
 
 /// Check if two agents are adjacent (within 1 cell)
+fn mating_failed(a: &Agent, b: &Agent, reason: &str) -> Result<()> {
+    debug!("{} and {} could not mate: {}", a.name(), b.name(), reason);
+    Ok(())
+}
+
 fn is_adjacent(a: &Agent, b: &Agent) -> bool {
     let dx = (a.physical.x as i32 - b.physical.x as i32).abs();
     let dy = (a.physical.y as i32 - b.physical.y as i32).abs();
     dx <= 1 && dy <= 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Engine with two adjacent, healthy, fed agents who have courted each other fully
+    fn courting_pair(test_name: &str) -> (Engine, Uuid, Uuid) {
+        let dir = std::env::temp_dir().join(format!("terrarium-test-{}-{}", test_name, std::process::id()));
+        let mut config = Config::default();
+        config.agents.count = 2;
+        let mut engine = Engine::new(config, dir.to_str().unwrap()).unwrap();
+
+        let (a, b) = (engine.agents[0].id, engine.agents[1].id);
+        for (i, partner) in [(0, b), (1, a)] {
+            let agent = &mut engine.agents[i];
+            agent.physical.x = 5;
+            agent.physical.y = 5;
+            agent.physical.food = 10;
+            agent.physical.energy = 1.0;
+            agent.reproduction.courtship_progress.insert(partner, 1.0);
+        }
+        (engine, a, b)
+    }
+
+    fn mate(agent: Uuid, target: Uuid) -> HashMap<Uuid, Action> {
+        HashMap::from([(agent, Action::Mate { target })])
+    }
+
+    fn expecting(engine: &Engine) -> bool {
+        engine.agents.iter().any(|a| a.reproduction.gestation.is_some())
+    }
+
+    #[test]
+    fn test_mating_proposal_accepted_on_later_epoch() {
+        let (mut engine, a, b) = courting_pair("accept");
+        engine.resolve_mating(1, &mate(a, b)).unwrap();
+        assert!(!expecting(&engine), "one-sided proposal must not conceive");
+
+        engine.resolve_mating(1 + MATE_PROPOSAL_DAYS - 1, &mate(b, a)).unwrap();
+        assert!(expecting(&engine));
+        assert!(engine.mate_proposals.is_empty());
+    }
+
+    #[test]
+    fn test_mating_proposal_expires() {
+        let (mut engine, a, b) = courting_pair("expire");
+        engine.resolve_mating(1, &mate(a, b)).unwrap();
+        engine.resolve_mating(1 + MATE_PROPOSAL_DAYS, &HashMap::new()).unwrap();
+        assert!(engine.mate_proposals.is_empty());
+
+        // Accepting after expiry only opens a new proposal from b
+        engine.resolve_mating(2 + MATE_PROPOSAL_DAYS, &mate(b, a)).unwrap();
+        assert!(!expecting(&engine));
+        assert!(engine.mate_proposals.contains_key(&b));
+    }
+
+    #[test]
+    fn test_mutual_mate_same_epoch() {
+        let (mut engine, a, b) = courting_pair("mutual");
+        let actions = HashMap::from([(a, Action::Mate { target: b }), (b, Action::Mate { target: a })]);
+        engine.resolve_mating(1, &actions).unwrap();
+        assert!(expecting(&engine));
+    }
 }
