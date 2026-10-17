@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::action::{Action, ActionContext, Direction};
+use crate::action::{Action, ActionContext, Direction, Neighbour};
 use crate::agent::{generate_names, generate_offspring_name, Agent, Episode, EpisodeCategory, Identity};
 use crate::config::Config;
 use crate::crafting::{MaterialType, RecipeRegistry, Tool, ToolQuality, ToolType};
@@ -405,12 +405,7 @@ impl Engine {
             // Get perception (world + environment)
             let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
             let perception = format!("{}\n{}", env_perception, world_perception);
-            // Food on others' territory can't be gathered, so it isn't worth heading for
-            let mut local_food = self.world.local_food(agent.physical.x, agent.physical.y);
-            if !self.may_gather_at(agent.id, agent.physical.x, agent.physical.y) {
-                local_food.here = 0;
-            }
-            local_food.adjacent.retain(|&(x, y, _)| self.may_gather_at(agent.id, x, y));
+            let local_food = self.world.local_food(agent.physical.x, agent.physical.y);
             let action_context = self.action_context(agent);
 
             // Get nearby agents
@@ -622,21 +617,15 @@ impl Engine {
                     let agent = &self.agents[agent_idx];
                     let pos = (agent.physical.x, agent.physical.y);
 
-                    // Check territory access - cannot gather on others' territory
-                    let can_gather = if let Some(cell) = self.world.get(pos.0, pos.1) {
-                        if let Some(ref territory) = cell.territory {
-                            territory.owner == agent_id || territory.allowed_guests.contains(&agent_id)
-                        } else {
-                            true // No territory - can gather
-                        }
-                    } else {
-                        false
-                    };
-
-                    if !can_gather {
-                        debug!("{} cannot gather on others' territory", agent.name());
-                        continue;
-                    }
+                    // Territory is a belief, not a wall: anyone can gather here. An owner who is
+                    // nearby sees it happen, and what they do about it is their choice
+                    let watching_owner = self
+                        .world
+                        .get(pos.0, pos.1)
+                        .and_then(|c| c.territory.as_ref())
+                        .filter(|t| t.owner != agent_id && !t.allowed_guests.contains(&agent_id))
+                        .and_then(|t| self.agents.iter().position(|a| a.id == t.owner && a.is_alive()))
+                        .filter(|&o| is_adjacent(&self.agents[o], agent));
 
                     // Calculate skill bonus: hunting +50% at max, foraging +30% at max
                     let hunting_level = agent.skills.level("hunting");
@@ -672,6 +661,17 @@ impl Engine {
                         self.agents[agent_idx].skills.practice("foraging", self.config.skills.practice_gain(), epoch);
 
                         self.log_and_track(Event::gathered(epoch, agent_id, taken))?;
+
+                        if let Some(o) = watching_owner {
+                            let name = self.agents[agent_idx].name().to_string();
+                            self.agents[o].memory.remember(Episode::conflict(
+                                epoch,
+                                &format!("I saw {} take {} food from my land", name, taken),
+                                -0.4,
+                                agent_id,
+                            ));
+                            self.agents[o].beliefs.update_trust(agent_id, &name, -0.1, epoch);
+                        }
 
                         // Update belief about this location
                         self.agents[agent_idx]
@@ -832,6 +832,9 @@ impl Engine {
                                     EpisodeCategory::Gift,
                                 ));
 
+                                self.agents[agent_idx].beliefs.get_or_create_social(target, &target_name).food_given += actual;
+                                self.agents[target_idx].beliefs.get_or_create_social(agent_id, &agent_name).food_received += actual;
+
                                 // Practice leadership when giving
                                 self.agents[agent_idx].skills.practice("leadership", self.config.skills.practice_gain(), epoch);
 
@@ -863,29 +866,9 @@ impl Engine {
                         let target_agent = &self.agents[target_idx];
 
                         if is_adjacent(agent, target_agent) && target_agent.is_alive() {
-                            // Calculate base damage (0.1 - 0.3 based on attacker's... randomness for now)
-                            let base_damage = 0.15 + rand::random::<f64>() * 0.1;
-
-                            // Check for defender's allies
-                            let defender_allies = self.find_nearby_allies(target, target_idx, epoch);
-
-                            // Calculate damage reduction from allies (20% per ally, max 50%)
-                            let ally_reduction = (defender_allies.len() as f64 * 0.20).min(0.50);
-                            let damage = base_damage * (1.0 - ally_reduction);
-
-                            // Log ally intervention if any allies defended
-                            if !defender_allies.is_empty() {
-                                // Pick the first ally as the primary defender
-                                let (primary_ally_id, _) = defender_allies[0];
-                                self.log_and_track(Event::ally_intervened(
-                                    epoch,
-                                    agent_id,
-                                    target,
-                                    primary_ally_id,
-                                    ally_reduction,
-                                ))?;
-                            }
-
+                            // Allies don't step in automatically: bystanders see the attack and
+                            // choose for themselves whether to help, retaliate or stay out of it
+                            let damage = 0.15 + rand::random::<f64>() * 0.1;
                             self.agents[target_idx].take_damage(damage);
 
                             // Violence is the arbiter of property: the attacker seizes food in
@@ -952,6 +935,20 @@ impl Engine {
                                 epoch,
                             );
                             self.agents[target_idx].beliefs.self_belief.perceived_safety -= 0.2;
+
+                            let bystanders: Vec<usize> = (0..self.agents.len())
+                                .filter(|&i| i != agent_idx && i != target_idx && self.agents[i].is_alive())
+                                .filter(|&i| is_adjacent(&self.agents[i], &self.agents[target_idx]))
+                                .collect();
+                            for i in bystanders {
+                                self.agents[i].memory.remember(Episode::conflict(
+                                    epoch,
+                                    &format!("I saw {} attack {}", agent_name, target_name),
+                                    -0.4,
+                                    agent_id,
+                                ));
+                                self.agents[i].beliefs.update_trust(agent_id, &agent_name, -0.1, epoch);
+                            }
                         }
                     }
                 }
@@ -1826,27 +1823,8 @@ impl Engine {
                     let owner_idx = self.agents.iter().position(|a| a.id == owner && a.is_alive());
                     let owner_present = owner_idx.is_some_and(|o| is_adjacent(&self.agents[agent_idx], &self.agents[o]));
 
-                    // An owner on guard fights the raider off half the time
-                    if owner_present && rand::random::<f64>() < 0.5 {
-                        let o = owner_idx.unwrap();
-                        let damage = 0.15 + rand::random::<f64>() * 0.1;
-                        self.agents[agent_idx].take_damage(damage);
-                        self.log_and_track(Event::raided(epoch, agent_id, owner, 0, Some(damage)))?;
-                        let owner_name = self.agents[o].name().to_string();
-                        self.agents[agent_idx].memory.remember(Episode::conflict(
-                            epoch, &format!("I tried to raid {}'s storehouse but was fought off", owner_name), -0.6, owner,
-                        ));
-                        self.agents[o].memory.remember(Episode::conflict(
-                            epoch, &format!("I fought {} off my storehouse", raider_name), -0.3, agent_id,
-                        ));
-                        self.agents[o].beliefs.update_trust(agent_id, &raider_name, -0.4, epoch);
-                        self.agents[o].beliefs.update_sentiment(agent_id, &raider_name, -0.3, epoch);
-                        if !self.agents[agent_idx].is_alive() {
-                            self.log_and_track(Event::died(epoch, agent_id, &format!("killed raiding {}'s storehouse", owner_name)))?;
-                        }
-                        continue;
-                    }
-
+                    // The engine never defends a store on the owner's behalf: an owner who is
+                    // present sees the theft and decides what to do about it (e.g. attack to take it back)
                     let stolen = self
                         .world
                         .get_mut(pos.0, pos.1)
@@ -1854,7 +1832,7 @@ impl Engine {
                         .and_then(|s| s.inventory.as_mut())
                         .map_or(0, |inv| inv.remove_food(6));
                     self.agents[agent_idx].add_food(stolen);
-                    self.log_and_track(Event::raided(epoch, agent_id, owner, stolen, None))?;
+                    self.log_and_track(Event::raided(epoch, agent_id, owner, stolen))?;
                     debug!("{} raided a storehouse and stole {} food", raider_name, stolen);
 
                     let owner_name = self.agent_name(owner);
@@ -2072,40 +2050,10 @@ impl Engine {
                         // Combat resolution
                         let owner_idx = self.agents.iter().position(|a| a.id == owner_id);
                         if let Some(o_idx) = owner_idx {
-                            // Check for allies on both sides
-                            let trespasser_allies = self.find_nearby_allies(agent_id, agent_idx, epoch);
-                            let owner_allies = self.find_nearby_allies(owner_id, o_idx, epoch);
-
-                            // Alliance bonuses reduce damage taken (20% per ally, max 50%)
-                            let trespasser_defense = (trespasser_allies.len() as f64 * 0.20).min(0.50);
-                            let owner_defense = (owner_allies.len() as f64 * 0.20).min(0.50);
-
-                            // Combat damage with alliance effects
+                            // Combat damage; the trespasser fights on unfamiliar ground
                             let base_damage = 0.15;
-                            let trespasser_damage = base_damage * 1.2 * (1.0 - trespasser_defense); // Trespasser takes more damage, reduced by allies
-                            let owner_damage = base_damage * (1.0 - owner_defense);
-
-                            // Log ally interventions
-                            if !trespasser_allies.is_empty() {
-                                let (primary_ally_id, _) = trespasser_allies[0];
-                                self.log_and_track(Event::ally_intervened(
-                                    epoch,
-                                    owner_id,
-                                    agent_id,
-                                    primary_ally_id,
-                                    trespasser_defense,
-                                ))?;
-                            }
-                            if !owner_allies.is_empty() {
-                                let (primary_ally_id, _) = owner_allies[0];
-                                self.log_and_track(Event::ally_intervened(
-                                    epoch,
-                                    agent_id,
-                                    owner_id,
-                                    primary_ally_id,
-                                    owner_defense,
-                                ))?;
-                            }
+                            let trespasser_damage = base_damage * 1.2;
+                            let owner_damage = base_damage;
 
                             self.agents[agent_idx].physical.health -= trespasser_damage;
                             self.agents[o_idx].physical.health -= owner_damage;
@@ -3007,6 +2955,32 @@ impl Engine {
                 .filter_map(|(c, s)| s.inventory.as_ref().filter(|i| i.food > 0).map(|i| (c, s, i.food)))
                 .min_by_key(|(c, ..)| (c.x, c.y) != pos)
                 .map(|(c, s, food)| (c.x, c.y, s.owner, self.agent_name(s.owner), food)),
+            neighbours: self
+                .agents
+                .iter()
+                .filter(|a| a.is_alive() && a.id != agent.id && is_adjacent(a, agent))
+                .map(|a| Neighbour {
+                    id: a.id,
+                    name: a.name().to_string(),
+                    x: a.physical.x,
+                    y: a.physical.y,
+                    health: a.physical.health,
+                    hunger: a.physical.hunger,
+                    food: a.physical.food,
+                    strength: a.physical.health * a.age_modifier(&self.config.aging),
+                    relatedness: relatedness(agent, a),
+                })
+                .collect(),
+            strength: agent.physical.health * agent.age_modifier(&self.config.aging),
+            claimed_cells: self
+                .world
+                .cells
+                .iter()
+                .filter(|c| c.x.abs_diff(pos.0) <= 1 && c.y.abs_diff(pos.1) <= 1)
+                .filter_map(|c| c.territory.as_ref().map(|t| (c, t)))
+                .filter(|(_, t)| t.owner != agent.id && !t.allowed_guests.contains(&agent.id))
+                .map(|(c, t)| (c.x, c.y, t.owner))
+                .collect(),
             territory_owner_nearby: territory
                 .filter(|t| t.owner != agent.id && !t.allowed_guests.contains(&agent.id))
                 .filter(|t| self.agents.iter().any(|a| a.id == t.owner && a.is_alive() && is_adjacent(a, agent)))
@@ -3030,12 +3004,6 @@ impl Engine {
             .filter(|(_, s)| pred(s))
             .min_by_key(|(c, _)| c.x.abs_diff(pos.0).max(c.y.abs_diff(pos.1)))
             .map(|(c, s)| (c.x, c.y, s))
-    }
-
-    /// Whether this agent may gather food at a cell (not someone else's territory)
-    fn may_gather_at(&self, agent_id: Uuid, x: usize, y: usize) -> bool {
-        self.world.get(x, y).and_then(|c| c.territory.as_ref())
-            .is_none_or(|t| t.owner == agent_id || t.allowed_guests.contains(&agent_id))
     }
 
     fn agent_name(&self, id: Uuid) -> String {
@@ -3812,37 +3780,7 @@ impl Engine {
         Some((debt_id, is_fulfilled))
     }
 
-    // ==================== Alliance Helpers ====================
-
-    /// Find all allies of an agent who are nearby (adjacent) and alive
-    /// Returns Vec of (ally_id, ally_idx)
-    fn find_nearby_allies(&self, agent_id: Uuid, agent_idx: usize, epoch: usize) -> Vec<(Uuid, usize)> {
-        let agent = &self.agents[agent_idx];
-
-        self.agents
-            .iter()
-            .enumerate()
-            .filter(|(idx, ally)| {
-                *idx != agent_idx
-                    && ally.is_alive()
-                    && is_adjacent(agent, ally)
-                    && self.trade_state.has_alliance(agent_id, ally.id, epoch)
-            })
-            .map(|(idx, ally)| (ally.id, idx))
-            .collect()
-    }
-
-    /// Calculate alliance combat bonus based on number of nearby allies
-    /// Returns a multiplier (1.0 = no bonus, 1.5 = 50% bonus with allies)
-    fn alliance_combat_bonus(&self, agent_id: Uuid, agent_idx: usize, epoch: usize) -> f64 {
-        let nearby_allies = self.find_nearby_allies(agent_id, agent_idx, epoch);
-        let ally_count = nearby_allies.len();
-
-        // Each ally provides 25% bonus, max 50%
-        1.0 + (ally_count as f64 * 0.25).min(0.5)
-    }
-
-    /// Update territory decay and group sharing each epoch
+    /// Update territory decay each epoch
     fn update_territories(&mut self, epoch: usize) -> Result<()> {
         // First, update territory strength/decay
         let mut lost_territories = Vec::new();
@@ -3881,39 +3819,7 @@ impl Engine {
             self.log_and_track(Event::territory_lost(epoch, owner, x, y))?;
         }
 
-        // Update group territory sharing
-        self.update_territory_guests();
-
         Ok(())
-    }
-
-    /// Auto-add group members as guests to each other's territories
-    fn update_territory_guests(&mut self) {
-        // Get current groups
-        let groups = self.group_tracker.current_groups().to_vec();
-
-        for group in groups {
-            let members: Vec<Uuid> = group.members.iter().copied().collect();
-
-            // For each territory owned by a group member
-            for y in 0..self.world.height {
-                for x in 0..self.world.width {
-                    if let Some(cell) = self.world.get_mut(x, y) {
-                        if let Some(ref mut claim) = cell.territory {
-                            if members.contains(&claim.owner) {
-                                // Add all group members as guests
-                                for member in &members {
-                                    if *member != claim.owner &&
-                                       !claim.allowed_guests.contains(member) {
-                                        claim.allowed_guests.push(*member);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -3926,6 +3832,19 @@ fn manhattan_distance(a: (usize, usize), b: (usize, usize)) -> usize {
 fn mating_failed(a: &Agent, b: &Agent, reason: &str) -> Result<()> {
     debug!("{} and {} could not mate: {}", a.name(), b.name(), reason);
     Ok(())
+}
+
+/// Relatedness as the agents know it: parent and child or full siblings 0.5, half siblings 0.25
+fn relatedness(a: &Agent, b: &Agent) -> f64 {
+    let (fa, fb) = (&a.reproduction.family, &b.reproduction.family);
+    if fa.parents.contains(&b.id) || fb.parents.contains(&a.id) {
+        return 0.5;
+    }
+    match fa.parents.iter().filter(|p| fb.parents.contains(p)).count() {
+        0 => 0.0,
+        1 => 0.25,
+        _ => 0.5,
+    }
 }
 
 fn is_adjacent(a: &Agent, b: &Agent) -> bool {

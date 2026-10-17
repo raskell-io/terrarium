@@ -10,6 +10,7 @@ mod crafting;
 mod engine;
 mod environment;
 mod groups;
+mod instinct;
 mod llm;
 mod observation;
 mod observer;

@@ -172,6 +172,7 @@ terrarium/
 │   │   └── memory.rs     # Episode storage, consolidation
 │   ├── action.rs         # Action types and resolution
 │   ├── llm.rs            # LLM integration
+│   ├── instinct.rs       # Fallback decisions without an LLM (docs/INSTINCTS.md)
 │   ├── observer.rs       # Observer protocol (views)
 │   ├── observation/
 │   │   ├── events.rs     # Event types
@@ -191,6 +192,7 @@ terrarium/
     ├── CONCEPT.md           # Vision and philosophy
     ├── ARCHITECTURE.md      # Technical decisions
     ├── MVP.md               # MVP scope
+    ├── INSTINCTS.md         # Science-based fallback behaviour
     ├── OBSERVER_PROTOCOL.md # Client interface
     └── TUI.md               # TUI client spec
 ```
@@ -205,6 +207,14 @@ Each agent prompt includes:
 3. Working state (what I see, what I need, what I'm doing)
 4. Available actions
 5. Request for reasoning + action choice
+
+### Choices Belong to the Deciding Mind
+
+Combat, peace, sharing and theft are choices made by the LLM (or, without one, by the
+instinct layer in `src/instinct.rs`, grounded in behavioural ecology; see `docs/INSTINCTS.md`).
+The engine never chooses on an agent's behalf: no automatic defence, no automatic ally
+intervention, no enforced territory. It applies the physics of each action and updates what
+agents perceive and believe.
 
 ### Belief Updates
 

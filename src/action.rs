@@ -5,6 +5,23 @@ use crate::crafting::{MaterialType, ToolType};
 use crate::structures::StructureType;
 use crate::trade::TradeableItem;
 
+/// What an agent can see of someone nearby
+#[derive(Debug, Clone)]
+pub struct Neighbour {
+    pub id: Uuid,
+    pub name: String,
+    pub x: usize,
+    pub y: usize,
+    pub health: f64,
+    pub hunger: f64,
+    /// Food they are visibly carrying
+    pub food: u32,
+    /// Fighting ability as it appears: health scaled by age
+    pub strength: f64,
+    /// Genetic relatedness, as far as the agent knows (parents, children, siblings)
+    pub relatedness: f64,
+}
+
 /// Situation-dependent actions an agent can take this epoch, computed by the
 /// engine with the same checks the action handlers apply
 #[derive(Debug, Clone, Default)]
@@ -28,6 +45,12 @@ pub struct ActionContext {
     pub raid_target: Option<(usize, usize, Uuid, String, u32)>,
     /// Owner of the territory this agent is trespassing on, if they are nearby
     pub territory_owner_nearby: Option<Uuid>,
+    /// Everyone within one step, as this agent sees them
+    pub neighbours: Vec<Neighbour>,
+    /// This agent's own fighting ability (health scaled by age)
+    pub strength: f64,
+    /// Cells here or adjacent claimed by someone else: (x, y, owner)
+    pub claimed_cells: Vec<(usize, usize, Uuid)>,
     /// This agent's nearest unfinished structure: (x, y, type, percent built)
     pub unfinished_project: Option<(usize, usize, StructureType, u32)>,
     /// Where this agent's nearest finished shelter or lean-to is
@@ -664,7 +687,7 @@ impl Action {
 
         // Territory actions
         if can_mark_territory {
-            actions.push("MARK - claim this cell as your territory (max 4 cells)".to_string());
+            actions.push("MARK - claim this cell as your territory (max 4 cells); others can still gather here, but you will see it".to_string());
         }
 
         if !trespassers.is_empty() {
@@ -673,13 +696,13 @@ impl Action {
         }
 
         if is_challenged {
-            actions.push("SUBMIT - leave the territory peacefully".to_string());
-            actions.push("FIGHT - fight to stay on the territory".to_string());
+            actions.push("SUBMIT - back down and leave this territory".to_string());
+            actions.push("FIGHT - fight the owner for this territory (both get hurt; whoever is left healthier wins it)".to_string());
         }
 
         if let Some((owner, food)) = raid_target {
             actions.push(format!(
-                "RAID - steal food from {}'s storehouse here ({} stored); they will fight you off if nearby",
+                "RAID - take food from {}'s storehouse here ({} stored)",
                 owner, food
             ));
         }
@@ -687,7 +710,7 @@ impl Action {
         if !nearby_agents.is_empty() {
             actions.push("SPEAK <name> <message> - say something to someone nearby".to_string());
             actions.push("GIVE <name> <amount> - give food to someone nearby".to_string());
-            actions.push("ATTACK <name> - attack someone nearby".to_string());
+            actions.push("ATTACK <name> - attack someone nearby (hurts them; the harder the blow, the more of their carried food you take)".to_string());
             if nearby_agents.len() >= 2 {
                 actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>".to_string());
             }

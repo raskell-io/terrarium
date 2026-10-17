@@ -301,8 +301,8 @@ impl Event {
         }
     }
 
-    /// A storehouse raid: `amount` food stolen, or `damage` taken when the owner fought the raider off
-    pub fn raided(epoch: usize, raider: Uuid, owner: Uuid, amount: u32, damage: Option<f64>) -> Self {
+    /// A storehouse raid: `amount` food stolen
+    pub fn raided(epoch: usize, raider: Uuid, owner: Uuid, amount: u32) -> Self {
         Self {
             epoch,
             event_type: EventType::Raided,
@@ -310,7 +310,6 @@ impl Event {
             target: Some(owner),
             data: EventData {
                 amount: Some(amount),
-                damage,
                 ..EventData::empty()
             },
         }

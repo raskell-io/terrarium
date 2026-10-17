@@ -65,6 +65,11 @@ pub struct SocialBelief {
     pub last_seen_epoch: usize,
     /// Brief impression
     pub impression: Option<String>,
+    /// Food they have given us, and we them (the ledger reciprocity runs on)
+    #[serde(default)]
+    pub food_received: u32,
+    #[serde(default)]
+    pub food_given: u32,
 }
 
 /// Beliefs about self
@@ -160,6 +165,8 @@ impl Beliefs {
             interaction_count: 0,
             last_seen_epoch: 0,
             impression: None,
+            food_received: 0,
+            food_given: 0,
         })
     }
 

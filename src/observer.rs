@@ -498,11 +498,7 @@ impl EventView {
             EventType::Raided => {
                 let name = agent_name(event.agent?);
                 let owner = agent_name(event.target?);
-                let text = if event.data.damage.is_some() {
-                    format!("{} tried to raid {}'s storehouse and was fought off", name, owner)
-                } else {
-                    format!("{} raided {}'s storehouse and stole {} food", name, owner, event.data.amount.unwrap_or(0))
-                };
+                let text = format!("{} raided {}'s storehouse and stole {} food", name, owner, event.data.amount.unwrap_or(0));
                 (text, EventViewType::Attack)
             }
             EventType::AllyIntervened => {
