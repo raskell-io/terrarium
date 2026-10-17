@@ -56,9 +56,16 @@ impl Engine {
         let mut agents = Vec::with_capacity(config.agents.count);
         let starting_age = config.agents.starting_age.unwrap_or(config.aging.youth_end);
 
+        // Scatter founders evenly across the world on a lattice, each on the nearest land
+        let (w, h) = (config.world.width, config.world.height);
+        let count = names.len().max(1);
+        let cols = ((count as f64 * w as f64 / h as f64).sqrt().ceil() as usize).max(1);
+        let rows = count.div_ceil(cols);
         for (i, name) in names.into_iter().enumerate() {
-            // Scatter agents across the world
-            let (x, y) = world.nearest_land((i * 3) % config.world.width, (i * 3) / config.world.width % config.world.height);
+            let (col, row) = (i % cols, i / cols);
+            let x = ((col as f64 + 0.5) * w as f64 / cols as f64) as usize;
+            let y = ((row as f64 + 0.5) * h as f64 / rows as f64) as usize;
+            let (x, y) = world.nearest_land(x.min(w - 1), y.min(h - 1));
             let mut agent = Agent::new(name, x, y, config.agents.starting_food);
             agent.physical.age = starting_age;
             agents.push(agent);
@@ -4316,6 +4323,22 @@ mod tests {
         engine.agents[1].physical.x = 8;
         engine.tick_disease(1).unwrap();
         assert_eq!(engine.agents[1].physical.sick_days, 0);
+    }
+
+    #[test]
+    fn test_founders_are_all_created_and_spread_out() {
+        let dir = std::env::temp_dir().join(format!("terrarium-test-founders-{}", std::process::id()));
+        let mut config = Config::default();
+        config.world.width = 30;
+        config.world.height = 30;
+        config.agents.count = 60;
+        let engine = Engine::new(config, dir.to_str().unwrap()).unwrap();
+        assert_eq!(engine.agents.len(), 60);
+        let names: std::collections::HashSet<_> = engine.agents.iter().map(|a| a.name().to_string()).collect();
+        assert_eq!(names.len(), 60, "names are unique");
+        let ys: Vec<usize> = engine.agents.iter().map(|a| a.physical.y).collect();
+        assert!(*ys.iter().min().unwrap() < 5 && *ys.iter().max().unwrap() > 25, "spread over the map: {:?}", ys);
+        assert!(engine.agents.iter().all(|a| engine.world.walkable(a.physical.x, a.physical.y)));
     }
 
     #[test]

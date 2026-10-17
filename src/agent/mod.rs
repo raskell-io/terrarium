@@ -788,6 +788,24 @@ pub fn generate_names(count: usize) -> Vec<String> {
         names.swap(i, j);
     }
 
+    // Beyond the list, compose names from syllables
+    const STARTS: &[&str] = &["Ka", "Lo", "Mi", "Ra", "Te", "Ve", "Sa", "Do", "Fi", "Ga", "Ny", "Bel", "Thu", "Wy"];
+    const ENDS: &[&str] = &["ra", "ren", "dan", "lis", "mo", "rin", "wen", "tha", "ko", "sel", "vi", "nor"];
+    let mut composed: Vec<String> = STARTS
+        .iter()
+        .flat_map(|s| ENDS.iter().map(move |e| format!("{}{}", s, e)))
+        .filter(|n| !names.contains(n))
+        .collect();
+    for i in (1..composed.len()).rev() {
+        let j = rng.random_range(0..=i);
+        composed.swap(i, j);
+    }
+    names.extend(composed);
+    let mut n = 2;
+    while names.len() < count {
+        names.push(format!("{} {}", NAMES[names.len() % NAMES.len()], n));
+        n += 1;
+    }
     names.into_iter().take(count).collect()
 }
 
