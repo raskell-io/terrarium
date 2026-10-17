@@ -621,7 +621,7 @@ impl Agent {
         };
 
         let physical = format!(
-            "Physical state: {}. You are {}, {}, and {}. You carry {} food.",
+            "Physical state: {}. You are {}, {}, and {}. You carry {} food (carried food slowly spoils; food in storage keeps).",
             age_desc, health_desc, hunger_desc, energy_desc, self.physical.food
         );
 

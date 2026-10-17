@@ -19,6 +19,7 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 count = 10
 starting_food = 10          # Each agent starts with some food
 # starting_age = 15        # Founders' age in days (default: end of youth, i.e. prime)
+# food_spoilage = 0.05      # Fraction of carried food that rots each day (stored food keeps)
 personality = "random"      # Randomize Big Five traits
 
 # Alternatively, specify distribution:

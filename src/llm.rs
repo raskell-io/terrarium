@@ -599,25 +599,60 @@ fn heuristic_action(
         }
     }
 
-    // Priority 4: Find food if running low
+    let pos = (agent.physical.x, agent.physical.y);
+    let toward = |target: (usize, usize)| crate::action::Direction::toward(pos, target).map(Action::Move);
+
+    // Priority 4: Find food if running low, falling back on stored food when none is in reach
     if agent.physical.food < 3 {
+        if let Some((x, y, stored)) = context.storage {
+            if stored > 0 && local_food.here == 0 {
+                if (x, y) == pos {
+                    return Action::WithdrawFood { amount: 5 };
+                }
+                if local_food.adjacent.is_empty() {
+                    if let Some(step) = toward((x, y)) {
+                        return step;
+                    }
+                }
+            }
+        }
         return seek_food(agent, local_food, &mut rng);
     }
 
-    // Priority 5: Shelter, building and tools
+    // Priority 5: Shelter, storage, building and territory
     if context.has_shelter && !context.is_sheltered {
         return Action::EnterShelter;
     }
+    // With a storehouse, stock up: gather a surplus and carry it home before it spoils,
+    // keeping a few days' worth in hand
+    if let Some((x, y, _)) = context.storage {
+        if agent.physical.food > 4 && (x, y) == pos {
+            return Action::DepositFood { amount: agent.physical.food - 4 };
+        }
+        if agent.physical.food >= 10 && rng.random::<f64>() < 0.6 {
+            if let Some(step) = toward((x, y)) {
+                return step;
+            }
+        }
+        if agent.physical.food < 10 && local_food.here > 0 && rng.random::<f64>() < 0.4 {
+            return Action::Gather;
+        }
+    }
+    // Defend our land: disagreeable owners challenge trespassers
+    if let Some((target, _)) = context.trespassers.first() {
+        if agent.identity.personality.agreeableness < 0.5 && rng.random::<f64>() < 0.6 {
+            return Action::Challenge { target: *target };
+        }
+    }
     // Finish what we started: work on our project here, or walk back to it when fed and rested
     if let Some((x, y, structure_type, _)) = context.unfinished_project {
-        let pos = (agent.physical.x, agent.physical.y);
         if (x, y) == pos {
             if agent.physical.energy > 0.3 {
                 return Action::Build { structure_type };
             }
         } else if agent.physical.hunger < 0.5 && agent.physical.energy > 0.4 && rng.random::<f64>() < 0.8 {
-            if let Some(dir) = crate::action::Direction::toward(pos, (x, y)) {
-                return Action::Move(dir);
+            if let Some(step) = toward((x, y)) {
+                return step;
             }
         }
     }
@@ -629,18 +664,33 @@ fn heuristic_action(
             return Action::Build { structure_type: context.buildable_structures[0] };
         }
     }
-    // Conscientious agents without a project start a shelter, gathering materials for one first
+    // Settle down around home: claim the land next to it
+    if let Some(home) = context.home {
+        let near_home = home.0.abs_diff(pos.0) <= 1 && home.1.abs_diff(pos.1) <= 1;
+        if near_home && context.can_mark_territory && !context.here_barren && rng.random::<f64>() < 0.3 {
+            return Action::Mark;
+        }
+    }
+    // Conscientious agents without a project work toward a home, then a storehouse,
+    // gathering the materials for it first (wood and fiber on fertile land, stone on barren)
     if context.unfinished_project.is_none()
-        && !context.owns_home
         && agent.identity.personality.conscientiousness > 0.5
-        && rng.random::<f64>() < 0.3
+        && rng.random::<f64>() < 0.5
     {
         use crate::structures::StructureType;
-        let preferred = [StructureType::Shelter, StructureType::LeanTo];
-        if let Some(structure_type) = preferred.iter().find(|s| context.buildable_structures.contains(s)) {
-            return Action::Build { structure_type: *structure_type };
+        let goal = if context.home.is_none() {
+            Some([StructureType::Shelter, StructureType::LeanTo])
+        } else if context.storage.is_none() {
+            Some([StructureType::Storage, StructureType::Storage])
+        } else {
+            None
+        };
+        if let Some(goal) = goal {
+            if let Some(structure_type) = goal.iter().find(|s| context.buildable_structures.contains(s)) {
+                return Action::Build { structure_type: *structure_type };
+            }
+            return gather_materials_for(agent, goal[1], context, &mut rng);
         }
-        return Action::GatherMaterials;
     }
     // Craft a tool we don't have yet, preferring ones that unlock new ways to get food
     if rng.random::<f64>() < 0.3 {
@@ -846,6 +896,55 @@ fn heuristic_action(
         9 => Action::Rest,
         _ => Action::Wait,
     }
+}
+
+/// Gather materials for a structure, walking to the right terrain for whatever is still missing
+fn gather_materials_for(
+    agent: &Agent,
+    structure_type: crate::structures::StructureType,
+    context: &ActionContext,
+    rng: &mut impl rand::RngExt,
+) -> Action {
+    use crate::crafting::MaterialType;
+    let registry = crate::structures::StructureRecipeRegistry::new();
+    let missing: Vec<MaterialType> = registry
+        .get(structure_type)
+        .map(|r| {
+            r.materials
+                .iter()
+                .filter(|(m, n)| agent.physical.materials.get(m).copied().unwrap_or(0) < **n)
+                .map(|(m, _)| *m)
+                .collect()
+        })
+        .unwrap_or_default();
+    if missing.is_empty() {
+        // We have everything; this cell just isn't free to build on
+        return random_move(rng);
+    }
+    let needs_stone = missing.iter().any(|m| matches!(m, MaterialType::Stone | MaterialType::Flint));
+    let needs_plants = missing.iter().any(|m| matches!(m, MaterialType::Wood | MaterialType::Fiber));
+    let pos = (agent.physical.x, agent.physical.y);
+    let (wanted_here, elsewhere) = if needs_plants && (!needs_stone || !context.here_barren) {
+        (!context.here_barren, context.adjacent_fertile)
+    } else {
+        (context.here_barren, context.adjacent_barren)
+    };
+    if wanted_here {
+        return Action::GatherMaterials;
+    }
+    match elsewhere.and_then(|target| crate::action::Direction::toward(pos, target)) {
+        Some(dir) => Action::Move(dir),
+        None => random_move(rng),
+    }
+}
+
+fn random_move(rng: &mut impl rand::RngExt) -> Action {
+    use crate::action::Direction;
+    let directions = [
+        Direction::North, Direction::South, Direction::East, Direction::West,
+        Direction::NorthEast, Direction::NorthWest, Direction::SouthEast, Direction::SouthWest,
+    ];
+    Action::Move(directions[rng.random_range(0..8)])
 }
 
 /// Gather if there is food here; otherwise step toward the richest visible cell,

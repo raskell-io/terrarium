@@ -336,10 +336,16 @@ impl Engine {
 
         // 2. Update agent needs (with environmental effects)
         let mut death_events = Vec::new();
+        let spoilage = self.config.agents.food_spoilage;
+        let mut rng = rand::rng();
         for agent in &mut self.agents {
             if agent.is_alive() {
                 agent.tick_hunger();
                 agent.tick_energy();
+
+                // Carried food spoils; food in storage keeps
+                let spoiled = crate::world::random_round(agent.physical.food as f64 * spoilage, &mut rng);
+                agent.physical.food -= spoiled.min(agent.physical.food);
 
                 // Apply environmental hazard effects (reduced by shelter)
                 if env_state.hazard_level > 0.0 {
@@ -399,7 +405,12 @@ impl Engine {
             // Get perception (world + environment)
             let world_perception = self.world.perception_summary(agent.physical.x, agent.physical.y);
             let perception = format!("{}\n{}", env_perception, world_perception);
-            let local_food = self.world.local_food(agent.physical.x, agent.physical.y);
+            // Food on others' territory can't be gathered, so it isn't worth heading for
+            let mut local_food = self.world.local_food(agent.physical.x, agent.physical.y);
+            if !self.may_gather_at(agent.id, agent.physical.x, agent.physical.y) {
+                local_food.here = 0;
+            }
+            local_food.adjacent.retain(|&(x, y, _)| self.may_gather_at(agent.id, x, y));
             let action_context = self.action_context(agent);
 
             // Get nearby agents
@@ -1522,7 +1533,7 @@ impl Engine {
 
                         // Add progress
                         let crafting_skill = self.agents[agent_idx].skills.level("crafting");
-                        let progress = 1 + (crafting_skill * 5.0).round() as u32;
+                        let progress = build_progress(crafting_skill);
 
                         let mut completed = None;
                         if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
@@ -1588,7 +1599,7 @@ impl Engine {
                         );
 
                         // Add initial progress
-                        let progress = 1 + (crafting_skill * 5.0).round() as u32;
+                        let progress = build_progress(crafting_skill);
                         if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
                             let mut s = new_structure;
                             s.add_progress(progress, epoch);
@@ -1766,6 +1777,36 @@ impl Engine {
                 }
 
                 // ==================== Territory Actions ====================
+
+                Action::DepositFood { amount } | Action::WithdrawFood { amount } => {
+                    let depositing = matches!(action, Action::DepositFood { .. });
+                    let pos = (self.agents[agent_idx].physical.x, self.agents[agent_idx].physical.y);
+                    let carried = self.agents[agent_idx].physical.food;
+                    let mut moved = 0;
+                    if let Some(inv) = self
+                        .world
+                        .get_mut(pos.0, pos.1)
+                        .and_then(|c| c.structure.as_mut())
+                        .filter(|s| s.structure_type.has_storage() && s.can_use(agent_id))
+                        .and_then(|s| s.inventory.as_mut())
+                    {
+                        moved = if depositing {
+                            let offered = amount.min(carried);
+                            offered - inv.add_food(offered)
+                        } else {
+                            inv.remove_food(amount)
+                        };
+                    }
+                    if moved > 0 {
+                        let agent = &mut self.agents[agent_idx];
+                        if depositing {
+                            agent.physical.food -= moved;
+                        } else {
+                            agent.physical.food += moved;
+                        }
+                        debug!("{} {} {} food", agent.name(), if depositing { "stored" } else { "took out" }, moved);
+                    }
+                }
 
                 Action::Mark => {
                     use crate::world::TerritoryClaim;
@@ -2867,13 +2908,40 @@ impl Engine {
                 .filter(|(_, s)| s.owner == agent.id && !s.is_complete())
                 .min_by_key(|(c, _)| c.x.abs_diff(pos.0).max(c.y.abs_diff(pos.1)))
                 .map(|(c, s)| (c.x, c.y, s.structure_type, s.build_progress * 100 / s.build_required.max(1))),
-            owns_home: self.world.cells.iter().filter_map(|c| c.structure.as_ref()).any(|s| {
-                s.owner == agent.id && s.is_complete() && s.structure_type.is_shelter()
-            }),
+            home: self.nearest_structure(pos, |s| s.owner == agent.id && s.is_complete() && s.structure_type.is_shelter())
+                .map(|(x, y, _)| (x, y)),
+            storage: self.nearest_structure(pos, |s| s.structure_type.has_storage() && s.can_use(agent.id))
+                .map(|(x, y, s)| (x, y, s.inventory.as_ref().map_or(0, |i| i.food))),
+            here_barren: cell.is_some_and(|c| c.terrain == Terrain::Barren),
+            adjacent_barren: self.world.adjacent(pos.0, pos.1).iter()
+                .find(|c| c.terrain == Terrain::Barren).map(|c| (c.x, c.y)),
+            adjacent_fertile: self.world.adjacent(pos.0, pos.1).iter()
+                .find(|c| c.terrain == Terrain::Fertile).map(|c| (c.x, c.y)),
             unfinished_here_owner: structure
                 .filter(|s| s.owner != agent.id && !s.is_complete())
                 .map(|s| (s.owner, self.agent_name(s.owner))),
         }
+    }
+
+    /// Nearest structure (by steps) matching the predicate: (x, y, structure)
+    fn nearest_structure(
+        &self,
+        pos: (usize, usize),
+        pred: impl Fn(&crate::structures::Structure) -> bool,
+    ) -> Option<(usize, usize, &crate::structures::Structure)> {
+        self.world
+            .cells
+            .iter()
+            .filter_map(|c| c.structure.as_ref().map(|s| (c, s)))
+            .filter(|(_, s)| pred(s))
+            .min_by_key(|(c, _)| c.x.abs_diff(pos.0).max(c.y.abs_diff(pos.1)))
+            .map(|(c, s)| (c.x, c.y, s))
+    }
+
+    /// Whether this agent may gather food at a cell (not someone else's territory)
+    fn may_gather_at(&self, agent_id: Uuid, x: usize, y: usize) -> bool {
+        self.world.get(x, y).and_then(|c| c.territory.as_ref())
+            .is_none_or(|t| t.owner == agent_id || t.allowed_guests.contains(&agent_id))
     }
 
     fn agent_name(&self, id: Uuid) -> String {
@@ -3772,6 +3840,12 @@ fn is_adjacent(a: &Agent, b: &Agent) -> bool {
     dx <= 1 && dy <= 1
 }
 
+/// Build progress from one day's work (recipes need 10-30; a skilled builder
+/// finishes a lean-to in a day, a novice in about three)
+fn build_progress(crafting_skill: f64) -> u32 {
+    4 + (crafting_skill * 6.0).round() as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3870,7 +3944,7 @@ mod tests {
 
         let context = engine.action_context(&engine.agents[0]);
         assert_eq!(context.unfinished_project, Some((5, 5, StructureType::LeanTo, 0)));
-        assert!(!context.owns_home);
+        assert_eq!(context.home, None);
         let context = engine.action_context(&engine.agents[1]);
         assert_eq!(context.unfinished_here_owner.map(|(id, _)| id), Some(a));
         assert_eq!(context.buildable_structures, vec![StructureType::LeanTo]);
@@ -3884,7 +3958,28 @@ mod tests {
         assert!(engine.recent_events.iter().any(|e| matches!(e.event_type, crate::observation::EventType::StructureCompleted) && e.agent == Some(a)));
         let context = engine.action_context(&engine.agents[0]);
         assert_eq!(context.unfinished_project, None);
-        assert!(context.owns_home);
+        assert_eq!(context.home, Some((5, 5)));
+    }
+
+    #[test]
+    fn test_food_storage_deposit_and_withdraw() {
+        use crate::structures::{Structure, StructureType};
+        let (mut engine, a, b) = courting_pair("storage");
+        let mut storage = Structure::new(StructureType::Storage, a, 20, ToolQuality::Standard, 0);
+        storage.add_progress(20, 0);
+        engine.world.get_mut(5, 5).unwrap().structure = Some(storage);
+        let stored = |e: &Engine| e.world.get(5, 5).unwrap().structure.as_ref().unwrap().inventory.as_ref().unwrap().food;
+
+        let context = engine.action_context(&engine.agents[0]);
+        assert_eq!(context.storage, Some((5, 5, 0)));
+        engine.resolve_actions(1, HashMap::from([(a, Action::DepositFood { amount: 6 })])).unwrap();
+        assert_eq!((engine.agents[0].physical.food, stored(&engine)), (4, 6));
+
+        // Only the owner (or permitted agents) may take from it
+        engine.resolve_actions(2, HashMap::from([(b, Action::WithdrawFood { amount: 5 })])).unwrap();
+        assert_eq!((engine.agents[1].physical.food, stored(&engine)), (10, 6));
+        engine.resolve_actions(3, HashMap::from([(a, Action::WithdrawFood { amount: 5 })])).unwrap();
+        assert_eq!((engine.agents[0].physical.food, stored(&engine)), (9, 1));
     }
 
     #[test]

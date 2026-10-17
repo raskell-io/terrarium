@@ -42,6 +42,9 @@ pub struct AgentsConfig {
     /// Age of founding agents in epochs (default: end of youth, so founders start in prime)
     #[serde(default)]
     pub starting_age: Option<usize>,
+    /// Fraction of carried food that spoils each epoch (food in storage keeps)
+    #[serde(default = "default_food_spoilage")]
+    pub food_spoilage: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,6 +275,10 @@ fn default_renege_trust_penalty() -> f64 { 0.5 }
 fn default_fulfill_trust_bonus() -> f64 { 0.15 }
 fn default_promise_deadline() -> usize { 20 }
 
+fn default_food_spoilage() -> f64 {
+    0.05
+}
+
 fn default_personality() -> String {
     "random".to_string()
 }
@@ -312,6 +319,7 @@ impl Default for Config {
                 starting_food: 10,
                 personality: "random".to_string(),
                 starting_age: None,
+                food_spoilage: default_food_spoilage(),
             },
             simulation: SimulationConfig {
                 epochs: 100,

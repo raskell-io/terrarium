@@ -25,8 +25,15 @@ pub struct ActionContext {
     pub is_trespassing: bool,
     /// This agent's nearest unfinished structure: (x, y, type, percent built)
     pub unfinished_project: Option<(usize, usize, StructureType, u32)>,
-    /// This agent owns a finished shelter or lean-to somewhere
-    pub owns_home: bool,
+    /// Where this agent's nearest finished shelter or lean-to is
+    pub home: Option<(usize, usize)>,
+    /// Nearest finished storage this agent may use: (x, y, food stored)
+    pub storage: Option<(usize, usize, u32)>,
+    /// This cell is barren (stone, flint) rather than fertile (wood, fiber)
+    pub here_barren: bool,
+    /// An adjacent barren cell and an adjacent fertile cell, if any
+    pub adjacent_barren: Option<(usize, usize)>,
+    pub adjacent_fertile: Option<(usize, usize)>,
     /// Owner of the unfinished structure on this cell, if it belongs to someone else
     pub unfinished_here_owner: Option<(Uuid, String)>,
 }
@@ -77,6 +84,10 @@ pub enum Action {
     LeaveShelter,
     /// Deposit materials into a storage structure
     Deposit { material: MaterialType, amount: u32 },
+    /// Store carried food in storage, where it does not spoil
+    DepositFood { amount: u32 },
+    /// Take food out of storage
+    WithdrawFood { amount: u32 },
     /// Withdraw materials from a storage structure
     Withdraw { material: MaterialType, amount: u32 },
     /// Grant access to your structure
@@ -316,7 +327,11 @@ impl Action {
                     } else {
                         1
                     };
-                    MaterialType::parse(&material_name).map(|material| Action::Deposit { material, amount })
+                    if material_name == "food" {
+                        Some(Action::DepositFood { amount })
+                    } else {
+                        MaterialType::parse(&material_name).map(|material| Action::Deposit { material, amount })
+                    }
                 } else {
                     None
                 }
@@ -330,7 +345,11 @@ impl Action {
                     } else {
                         1
                     };
-                    MaterialType::parse(&material_name).map(|material| Action::Withdraw { material, amount })
+                    if material_name == "food" {
+                        Some(Action::WithdrawFood { amount })
+                    } else {
+                        MaterialType::parse(&material_name).map(|material| Action::Withdraw { material, amount })
+                    }
                 } else {
                     None
                 }
@@ -504,6 +523,8 @@ impl Action {
             Action::Withdraw { material, amount } => {
                 format!("{} withdraws {} {}", agent_name, amount, material.display_name())
             }
+            Action::DepositFood { amount } => format!("{} stores {} food", agent_name, amount),
+            Action::WithdrawFood { amount } => format!("{} takes {} food from storage", agent_name, amount),
             Action::Permit { target } => {
                 let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
                 format!("{} permits {} to use their structure", agent_name, target_name)
@@ -621,8 +642,8 @@ impl Action {
         }
 
         if has_storage {
-            actions.push("DEPOSIT <material> [amount] - deposit materials into storage".to_string());
-            actions.push("WITHDRAW <material> [amount] - withdraw materials from storage".to_string());
+            actions.push("DEPOSIT <material|food> [amount] - put materials or food into storage (stored food does not spoil)".to_string());
+            actions.push("WITHDRAW <material|food> [amount] - take materials or food out of storage".to_string());
         }
 
         if owns_structure && !nearby_agents.is_empty() {
@@ -861,6 +882,13 @@ mod tests {
         assert!(matches!(Action::parse("GATHER", &[]), Some(Action::Gather)));
         assert!(matches!(Action::parse("EAT", &[]), Some(Action::Eat)));
         assert!(matches!(Action::parse("REST", &[]), Some(Action::Rest)));
+    }
+
+    #[test]
+    fn test_parse_food_storage() {
+        assert!(matches!(Action::parse("DEPOSIT food 3", &[]), Some(Action::DepositFood { amount: 3 })));
+        assert!(matches!(Action::parse("WITHDRAW food", &[]), Some(Action::WithdrawFood { amount: 1 })));
+        assert!(matches!(Action::parse("DEPOSIT wood 2", &[]), Some(Action::Deposit { amount: 2, .. })));
     }
 
     #[test]

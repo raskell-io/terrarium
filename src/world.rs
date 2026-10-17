@@ -32,7 +32,7 @@ pub struct World {
 }
 
 /// Round to an integer randomly, so the expected value equals `x`
-fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
+pub fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
     let base = x.floor() as u32;
     if rng.random::<f64>() < x.fract() { base + 1 } else { base }
 }
