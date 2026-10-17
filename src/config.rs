@@ -39,6 +39,9 @@ pub struct AgentsConfig {
     pub starting_food: u32,
     #[serde(default = "default_personality")]
     pub personality: String,
+    /// Age of founding agents in epochs (default: end of youth, so founders start in prime)
+    #[serde(default)]
+    pub starting_age: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -301,6 +304,7 @@ impl Default for Config {
                 count: 10,
                 starting_food: 10,
                 personality: "random".to_string(),
+                starting_age: None,
             },
             simulation: SimulationConfig {
                 epochs: 100,

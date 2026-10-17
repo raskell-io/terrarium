@@ -47,12 +47,15 @@ impl Engine {
         // Create agents
         let names = generate_names(config.agents.count);
         let mut agents = Vec::with_capacity(config.agents.count);
+        let starting_age = config.agents.starting_age.unwrap_or(config.aging.youth_end);
 
         for (i, name) in names.into_iter().enumerate() {
             // Scatter agents across the world
             let x = (i * 3) % config.world.width;
             let y = (i * 3) / config.world.width % config.world.height;
-            agents.push(Agent::new(name, x, y, config.agents.starting_food));
+            let mut agent = Agent::new(name, x, y, config.agents.starting_food);
+            agent.physical.age = starting_age;
+            agents.push(agent);
         }
 
         // Create LLM client

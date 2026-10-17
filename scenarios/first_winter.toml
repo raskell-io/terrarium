@@ -18,6 +18,7 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 [agents]
 count = 10
 starting_food = 10          # Each agent starts with some food
+# starting_age = 15        # Founders' age in days (default: end of youth, i.e. prime)
 personality = "random"      # Randomize Big Five traits
 
 # Alternatively, specify distribution:
