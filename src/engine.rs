@@ -1233,23 +1233,33 @@ impl Engine {
                         // Base materials based on terrain
                         let mut gathered: Vec<(MaterialType, u32)> = Vec::new();
 
+                        // What the land here still holds limits what can be taken
+                        let (wood_stock, stone_stock) = (cell.wood, cell.stone);
                         match terrain {
                             Terrain::Fertile => {
-                                // Wood and fiber from fertile terrain
-                                let wood_amount = (1.0 + foraging_skill * 2.0 + tool_bonus).round() as u32;
-                                let fiber_amount = (1.0 + foraging_skill * 2.0).round() as u32;
+                                // Wood and fiber from the stand on fertile terrain
+                                let wood_amount = ((1.0 + foraging_skill * 2.0 + tool_bonus).round() as u32).min(wood_stock);
+                                let fiber_amount = ((1.0 + foraging_skill * 2.0).round() as u32).min(wood_stock - wood_amount);
                                 gathered.push((MaterialType::Wood, wood_amount));
                                 gathered.push((MaterialType::Fiber, fiber_amount));
                             }
                             Terrain::Barren => {
                                 // Stone and occasionally flint from barren terrain
-                                let stone_amount = (2.0 + foraging_skill).round() as u32;
+                                let stone_amount = ((2.0 + foraging_skill).round() as u32).min(stone_stock);
                                 gathered.push((MaterialType::Stone, stone_amount));
 
-                                // 20% chance for flint
-                                if rand::random::<f64>() < 0.2 + foraging_skill * 0.1 {
+                                // 20% chance for flint while there is stone to work
+                                if stone_stock > stone_amount && rand::random::<f64>() < 0.2 + foraging_skill * 0.1 {
                                     gathered.push((MaterialType::Flint, 1));
                                 }
+                            }
+                        }
+                        gathered.retain(|(_, amount)| *amount > 0);
+                        let taken: u32 = gathered.iter().map(|(_, a)| a).sum();
+                        if let Some(cell) = self.world.get_mut(pos.0, pos.1) {
+                            match terrain {
+                                Terrain::Fertile => cell.wood -= taken,
+                                Terrain::Barren => cell.stone -= taken,
                             }
                         }
 
@@ -1471,9 +1481,22 @@ impl Engine {
 
                     let foraging_skill = agent.skills.level("foraging");
                     let tool_bonus = agent.physical.tool_bonus_for_skill("foraging");
+                    let pos = (agent.physical.x, agent.physical.y);
 
-                    // Chopping is efficient wood gathering
-                    let wood_amount = (3.0 + foraging_skill * 3.0 + tool_bonus * 2.0).round() as u32;
+                    // Chopping is efficient wood gathering, from the stand that grows here
+                    let wanted = (3.0 + foraging_skill * 3.0 + tool_bonus * 2.0).round() as u32;
+                    let wood_amount = match self.world.get_mut(pos.0, pos.1) {
+                        Some(cell) => {
+                            let taken = wanted.min(cell.wood);
+                            cell.wood -= taken;
+                            taken
+                        }
+                        None => 0,
+                    };
+                    if wood_amount == 0 {
+                        debug!("{} found no wood to chop", self.agents[agent_idx].name());
+                        continue;
+                    }
                     self.agents[agent_idx].physical.add_material(MaterialType::Wood, wood_amount);
 
                     // Practice foraging
@@ -2945,10 +2968,11 @@ impl Engine {
             storage: self.nearest_structure(pos, |s| s.structure_type.has_storage() && s.can_use(agent.id))
                 .map(|(x, y, s)| (x, y, s.inventory.as_ref().map_or(0, |i| i.food))),
             here_barren: cell.is_some_and(|c| c.terrain == Terrain::Barren),
+            materials_here: cell.is_some_and(|c| c.wood > 0 || c.stone > 0),
             adjacent_barren: self.world.adjacent(pos.0, pos.1).iter()
-                .find(|c| c.terrain == Terrain::Barren).map(|c| (c.x, c.y)),
+                .find(|c| c.terrain == Terrain::Barren && c.stone > 0).map(|c| (c.x, c.y)),
             adjacent_fertile: self.world.adjacent(pos.0, pos.1).iter()
-                .find(|c| c.terrain == Terrain::Fertile).map(|c| (c.x, c.y)),
+                .find(|c| c.terrain == Terrain::Fertile && c.wood > 0).map(|c| (c.x, c.y)),
             raid_target: self
                 .world
                 .cells
@@ -4041,6 +4065,29 @@ mod tests {
             assert!(engine.agents[1].physical.health < 1.0, "the attack must land before the move");
             assert_eq!(engine.agents[1].physical.x, 6);
         }
+    }
+
+    #[test]
+    fn test_gathering_depletes_the_land() {
+        let (mut engine, a, _) = courting_pair("deplete");
+        let cell = engine.world.get_mut(5, 5).unwrap();
+        cell.terrain = Terrain::Barren;
+        cell.stone = 3;
+        // Stone and flint both come out of the cell's stone
+        let mined = |e: &Engine| {
+            let m = &e.agents[0].physical.materials;
+            m.get(&MaterialType::Stone).copied().unwrap_or(0) + m.get(&MaterialType::Flint).copied().unwrap_or(0)
+        };
+        engine.resolve_actions(1, HashMap::from([(a, Action::GatherMaterials)])).unwrap();
+        let got = mined(&engine);
+        let left = engine.world.get(5, 5).unwrap().stone;
+        assert_eq!(got + left, 3, "stone is moved, not created");
+        assert!(got >= 2);
+        engine.resolve_actions(2, HashMap::from([(a, Action::GatherMaterials)])).unwrap();
+        engine.resolve_actions(3, HashMap::from([(a, Action::GatherMaterials)])).unwrap();
+        assert_eq!(engine.world.get(5, 5).unwrap().stone, 0);
+        assert_eq!(mined(&engine), 3);
+        assert!(engine.world.describe_cell(5, 5).contains("quarried out"));
     }
 
     #[test]

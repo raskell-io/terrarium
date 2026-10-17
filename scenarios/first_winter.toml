@@ -15,6 +15,12 @@ fertile_fraction = 0.3      # 30% of cells produce food
 initial_food_per_fertile = 15
 food_regen_rate = 0.1       # 10% of capacity per epoch
 
+# Building materials (defaults shown)
+# [world.materials]
+# wood_per_fertile = 30     # Wood and fiber a fertile cell holds when fully grown
+# wood_regrowth = 0.1       # Logistic rate: growth = r * W * (1 - W/K)
+# stone_per_barren = 40     # Finite: quarried stone never comes back
+
 [agents]
 count = 10
 starting_food = 10          # Each agent starts with some food

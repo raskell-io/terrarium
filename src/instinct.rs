@@ -641,7 +641,7 @@ fn gather_materials_for(
     } else {
         (context.here_barren, context.adjacent_barren)
     };
-    if wanted_here {
+    if wanted_here && context.materials_here {
         return Action::GatherMaterials;
     }
     match elsewhere.and_then(|target| Direction::toward(pos, target)) {

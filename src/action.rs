@@ -63,7 +63,9 @@ pub struct ActionContext {
     pub storage: Option<(usize, usize, u32)>,
     /// This cell is barren (stone, flint) rather than fertile (wood, fiber)
     pub here_barren: bool,
-    /// An adjacent barren cell and an adjacent fertile cell, if any
+    /// This cell still holds wood or stone
+    pub materials_here: bool,
+    /// An adjacent barren cell with stone and an adjacent fertile cell with wood, if any
     pub adjacent_barren: Option<(usize, usize)>,
     pub adjacent_fertile: Option<(usize, usize)>,
     /// Owner of the unfinished structure on this cell, if it belongs to someone else

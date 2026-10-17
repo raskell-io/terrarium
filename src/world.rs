@@ -29,6 +29,9 @@ pub struct World {
     pub height: usize,
     pub cells: Vec<Cell>,
     pub epoch: usize,
+    /// Logistic regrowth rate of wood and fiber stands
+    #[serde(default)]
+    pub wood_regrowth: f64,
 }
 
 /// Round to an integer randomly, so the expected value equals `x`
@@ -58,6 +61,14 @@ pub struct Cell {
     pub structure: Option<Structure>,
     /// Territory claim on this cell (if any)
     pub territory: Option<TerritoryClaim>,
+    /// Standing wood and fiber (trees and brush) on fertile land; regrows
+    #[serde(default)]
+    pub wood: u32,
+    #[serde(default)]
+    pub wood_capacity: u32,
+    /// Stone (and flint) on barren land; finite, never comes back once quarried
+    #[serde(default)]
+    pub stone: u32,
 }
 
 /// Terrain types
@@ -75,7 +86,37 @@ pub struct WorldConfig {
     pub fertile_fraction: f64,
     pub initial_food_per_fertile: u32,
     pub food_regen_rate: f64,
+    #[serde(default)]
+    pub materials: MaterialsConfig,
 }
+
+/// Building materials in the landscape
+#[derive(Debug, Clone, Deserialize)]
+pub struct MaterialsConfig {
+    /// Wood and fiber a fertile cell holds when fully grown
+    #[serde(default = "default_wood_capacity")]
+    pub wood_per_fertile: u32,
+    /// Logistic regrowth rate r: growth = r * W * (1 - W / K), fastest at half capacity
+    #[serde(default = "default_wood_regrowth")]
+    pub wood_regrowth: f64,
+    /// Stone a barren cell holds; it does not regrow
+    #[serde(default = "default_stone")]
+    pub stone_per_barren: u32,
+}
+
+impl Default for MaterialsConfig {
+    fn default() -> Self {
+        Self {
+            wood_per_fertile: default_wood_capacity(),
+            wood_regrowth: default_wood_regrowth(),
+            stone_per_barren: default_stone(),
+        }
+    }
+}
+
+fn default_wood_capacity() -> u32 { 30 }
+fn default_wood_regrowth() -> f64 { 0.1 }
+fn default_stone() -> u32 { 40 }
 
 impl World {
     /// Create a new world from configuration
@@ -95,6 +136,10 @@ impl World {
                     Terrain::Fertile => (config.initial_food_per_fertile, 20),
                     Terrain::Barren => (0, 0),
                 };
+                let (wood, stone) = match terrain {
+                    Terrain::Fertile => (config.materials.wood_per_fertile, 0),
+                    Terrain::Barren => (0, config.materials.stone_per_barren),
+                };
 
                 cells.push(Cell {
                     x,
@@ -104,6 +149,9 @@ impl World {
                     food_capacity,
                     structure: None,
                     territory: None,
+                    wood,
+                    wood_capacity: wood,
+                    stone,
                 });
             }
         }
@@ -113,6 +161,7 @@ impl World {
             height: config.height,
             cells,
             epoch: 0,
+            wood_regrowth: config.materials.wood_regrowth,
         }
     }
 
@@ -171,6 +220,23 @@ impl World {
         }
     }
 
+    /// Wood and fiber stands regrow logistically (Verhulst): slowly when stripped bare, fastest
+    /// at half capacity, levelling off when full. A bare stand resprouts as if one unit remained.
+    /// Seasons scale growth like they do food
+    pub fn regrow_wood(&mut self, modifier: f64) {
+        let mut rng = rand::rng();
+        let r = self.wood_regrowth * modifier;
+        for cell in &mut self.cells {
+            if cell.wood_capacity == 0 || cell.wood >= cell.wood_capacity {
+                continue;
+            }
+            let k = cell.wood_capacity as f64;
+            let w = (cell.wood as f64).max(1.0);
+            let growth = random_round(r * w * (1.0 - w / k), &mut rng);
+            cell.wood = (cell.wood + growth).min(cell.wood_capacity);
+        }
+    }
+
     /// Standing food dies back by the given fraction (e.g. in winter)
     pub fn decay_food(&mut self, fraction: f64) {
         if fraction <= 0.0 {
@@ -191,6 +257,7 @@ impl World {
         self.epoch += 1;
         self.decay_food(food_decay);
         self.regenerate_resources(regen_rate, food_regen_modifier);
+        self.regrow_wood(food_regen_modifier.min(1.0));
     }
 
     /// Describe a cell for agent perception
@@ -216,7 +283,14 @@ impl World {
                 let territory_desc = cell.territory.as_ref().map(|_| {
                     " (claimed territory)"
                 }).unwrap_or_default();
-                format!("{} with {}{}{}", terrain_desc, food_desc, structure_desc, territory_desc)
+                let materials_desc = match cell.terrain {
+                    Terrain::Fertile if cell.wood * 2 >= cell.wood_capacity => ", wooded",
+                    Terrain::Fertile if cell.wood > 0 => ", sparse brush",
+                    Terrain::Fertile => ", stripped of wood",
+                    Terrain::Barren if cell.stone > 0 => ", stony",
+                    Terrain::Barren => ", quarried out",
+                };
+                format!("{} with {}{}{}{}", terrain_desc, food_desc, materials_desc, structure_desc, territory_desc)
             }
             None => "unknown".to_string(),
         }
@@ -311,6 +385,7 @@ mod tests {
             fertile_fraction: 1.0,
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.food).sum::<u32>();
@@ -327,6 +402,37 @@ mod tests {
     }
 
     #[test]
+    fn test_wood_regrows_logistically() {
+        let config = WorldConfig {
+            width: 10,
+            height: 10,
+            fertile_fraction: 1.0,
+            initial_food_per_fertile: 10,
+            food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
+        };
+        let mut world = World::new(&config);
+        let total = |w: &World| w.cells.iter().map(|c| c.wood).sum::<u32>();
+        assert_eq!(total(&world), 3000);
+        world.regrow_wood(1.0);
+        assert_eq!(total(&world), 3000, "full stands don't grow");
+
+        // 100 stands at 15/30 grow ~0.75 each; at 1/30 (or bare) only ~0.1
+        for c in &mut world.cells { c.wood = 15; }
+        world.regrow_wood(1.0);
+        let half = total(&world) - 1500;
+        for c in &mut world.cells { c.wood = 0; }
+        world.regrow_wood(1.0);
+        let bare = total(&world);
+        assert!((50..=100).contains(&half), "half-grown: {}", half);
+        assert!(bare < 25, "bare: {}", bare);
+        assert!(bare > 0, "bare stands resprout");
+        for c in &mut world.cells { c.wood = 0; }
+        world.regrow_wood(0.0);
+        assert_eq!(total(&world), 0, "nothing grows when the season allows none");
+    }
+
+    #[test]
     fn test_world_creation() {
         let config = WorldConfig {
             width: 10,
@@ -334,6 +440,7 @@ mod tests {
             fertile_fraction: 0.3,
             initial_food_per_fertile: 15,
             food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
         };
         let world = World::new(&config);
         assert_eq!(world.cells.len(), 100);
@@ -349,6 +456,7 @@ mod tests {
             fertile_fraction: 1.0,
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
         };
         let world = World::new(&config);
         assert!(world.get(0, 0).is_some());
@@ -364,6 +472,7 @@ mod tests {
             fertile_fraction: 1.0,
             initial_food_per_fertile: 10,
             food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
         };
         let world = World::new(&config);
 

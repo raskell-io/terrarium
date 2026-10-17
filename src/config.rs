@@ -320,6 +320,7 @@ impl Default for Config {
                 fertile_fraction: 0.3,
                 initial_food_per_fertile: 15,
                 food_regen_rate: 0.1,
+                materials: Default::default(),
             },
             agents: AgentsConfig {
                 count: 10,
