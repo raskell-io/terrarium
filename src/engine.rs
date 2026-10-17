@@ -2972,6 +2972,7 @@ impl Engine {
                 })
                 .collect(),
             strength: agent.physical.health * agent.age_modifier(&self.config.aging),
+            mating_food_cost: if self.config.reproduction.enabled { self.config.reproduction.mating_food_cost } else { 0 },
             claimed_cells: self
                 .world
                 .cells

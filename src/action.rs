@@ -45,6 +45,8 @@ pub struct ActionContext {
     pub raid_target: Option<(usize, usize, Uuid, String, u32)>,
     /// Owner of the territory this agent is trespassing on, if they are nearby
     pub territory_owner_nearby: Option<Uuid>,
+    /// Food each partner must spend to mate (0 if reproduction is off)
+    pub mating_food_cost: u32,
     /// Everyone within one step, as this agent sees them
     pub neighbours: Vec<Neighbour>,
     /// This agent's own fighting ability (health scaled by age)

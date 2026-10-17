@@ -42,6 +42,8 @@ const RECIPROCITY_WTR: f64 = 0.5;
 const REPUTATION_COST: f64 = 0.03;
 /// Survival-equivalent cost of breaking the norm against harming others
 const NORM_COST: f64 = 0.02;
+/// Survival value at which reserves are high enough to breed (about 16 days' reserves)
+const BREEDING_RESERVE: f64 = 0.9;
 /// Days a harm stays a grievance
 const GRUDGE_DAYS: usize = 10;
 /// Survival-equivalent value of deterring someone who harmed us, per unit of harm
@@ -283,13 +285,15 @@ pub fn decide(
     }
 
     // 6. Share food by Hamilton's rule, w * B > C, in survival terms: give the amount that best
-    // trades our loss against the recipient's gain, weighted by how much we care about them
+    // trades our loss against the recipient's gain, weighted by how much we care about them.
+    // Survival isn't everything: an agent able to breed and courting keeps back what mating costs
+    let spare = agent.physical.food.saturating_sub(breeding_reserve(agent, context));
     let best_gift = neighbours
         .iter()
         .flat_map(|n| {
             let w = help_weight(agent, n.id, n.relatedness);
             let them = Body::of_neighbour(n);
-            (1..=agent.physical.food).map(move |k| (n.id, k, w * them.food_gain(k) - me.food_loss(k)))
+            (1..=spare).map(move |k| (n.id, k, w * them.food_gain(k) - me.food_loss(k)))
         })
         .max_by(|a, b| a.2.total_cmp(&b.2));
     if let Some((target, amount, net)) = best_gift {
@@ -298,17 +302,22 @@ pub fn decide(
         }
     }
 
-    // 7. Provision: forage, store surplus where it keeps, build
+    // 7. Reproduce when ready and a partner is here: breeding is what the rest is for
+    if let Some(action) = mate(agent, context, mate_proposals) {
+        return action;
+    }
+
+    // 8. Provision: forage, store surplus where it keeps, build
     if let Some(action) = provision(agent, local_food, context, &mut rng, &toward) {
         return action;
     }
 
-    // 8. Social time, once needs are met
-    if let Some(action) = socialise(agent, context, mate_proposals, epoch, &mut rng) {
+    // 9. Social time, once needs are met
+    if let Some(action) = socialise(agent, context, epoch, &mut rng) {
         return action;
     }
 
-    // 9. Nothing pressing: gather materials or explore
+    // 10. Nothing pressing: gather materials or explore
     if rng.random::<f64>() < 0.3 {
         Action::GatherMaterials
     } else {
@@ -333,6 +342,11 @@ fn provision(
                 return Some(if (x, y) == pos { Action::WithdrawFood { amount: 5 } } else { toward((x, y))? });
             }
         }
+        return Some(seek_food(agent, local_food, context, rng));
+    }
+
+    // Courting: build up what mating will cost
+    if agent.physical.food < breeding_reserve(agent, context) {
         return Some(seek_food(agent, local_food, context, rng));
     }
 
@@ -421,45 +435,50 @@ fn provision(
     None
 }
 
-/// Courtship, mating, teaching and gossip
-fn socialise(
-    agent: &Agent,
-    context: &ActionContext,
-    mate_proposals: &[(Uuid, &str)],
-    epoch: usize,
-    rng: &mut impl RngExt,
-) -> Option<Action> {
+/// Food an agent able to breed and courting keeps for mating (capital breeders build reserves first)
+fn breeding_reserve(agent: &Agent, context: &ActionContext) -> u32 {
+    let courting = agent.reproduction.courtship_progress.values().any(|&p| p >= 0.3);
+    if can_reproduce(agent) && courting { context.mating_food_cost } else { 0 }
+}
+
+fn can_reproduce(agent: &Agent) -> bool {
+    agent.reproduction.mating_cooldown == 0 && agent.reproduction.gestation.is_none() && agent.physical.health > 0.5
+}
+
+/// Breed when reserves allow (capital breeding): in good condition, able to pay for it, and with
+/// a partner who is here, never kin (the Westermarck effect)
+fn mate(agent: &Agent, context: &ActionContext, mate_proposals: &[(Uuid, &str)]) -> Option<Action> {
+    let ready = can_reproduce(agent)
+        && Body::of(agent).value() >= BREEDING_RESERVE
+        && agent.physical.food >= context.mating_food_cost;
+    if !ready {
+        return None;
+    }
+    let sentiment = |id: &Uuid| agent.beliefs.social.get(id).map_or(0.0, |b| b.sentiment);
+    let unrelated = |id: &Uuid| context.neighbours.iter().any(|n| n.id == *id && n.relatedness == 0.0);
+    let rested = agent.physical.energy > 0.4;
+
+    if let Some((proposer, name)) = mate_proposals.iter().find(|(id, _)| sentiment(id) >= 0.0 && unrelated(id)) {
+        debug!("Instinct: accepting mating proposal from {}", name);
+        return Some(if rested { Action::Mate { target: *proposer } } else { Action::Rest });
+    }
+    agent
+        .reproduction
+        .courtship_progress
+        .iter()
+        .filter(|(id, score)| **score >= 0.7 && unrelated(id))
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(id, _)| if rested { Action::Mate { target: *id } } else { Action::Rest })
+}
+
+/// Courtship, teaching and gossip
+fn socialise(agent: &Agent, context: &ActionContext, epoch: usize, rng: &mut impl RngExt) -> Option<Action> {
     let neighbours = &context.neighbours;
     let sentiment = |id: &Uuid| agent.beliefs.social.get(id).map_or(0.0, |b| b.sentiment);
     // Kin are never mates (the Westermarck effect)
     let unrelated = |id: &Uuid| neighbours.iter().any(|n| n.id == *id && n.relatedness == 0.0);
 
-    // Breed when reserves allow (capital breeding)
-    let can_reproduce = agent.reproduction.mating_cooldown == 0
-        && agent.reproduction.gestation.is_none()
-        && agent.physical.health > 0.5;
-    let ready_to_mate = can_reproduce && agent.physical.food >= 5;
-    let rested = agent.physical.energy > 0.4;
-
-    if ready_to_mate {
-        if let Some((proposer, name)) = mate_proposals.iter().find(|(id, _)| sentiment(id) >= 0.0 && unrelated(id)) {
-            if !rested {
-                return Some(Action::Rest);
-            }
-            debug!("Instinct: accepting mating proposal from {}", name);
-            return Some(Action::Mate { target: *proposer });
-        }
-        let partner = agent
-            .reproduction
-            .courtship_progress
-            .iter()
-            .filter(|(id, score)| **score >= 0.7 && unrelated(id))
-            .max_by(|a, b| a.1.total_cmp(b.1))
-            .map(|(id, _)| *id);
-        if let Some(target) = partner {
-            return Some(if rested { Action::Mate { target } } else { Action::Rest });
-        }
-    }
+    let can_reproduce = can_reproduce(agent);
 
     // Courtship follows familiarity and liking (propinquity): keep courting a current partner,
     // the sociable sometimes start with whoever nearby they like best
@@ -676,6 +695,33 @@ mod tests {
         let context = ActionContext { strength: 1.0, neighbours: vec![hungry], ..Default::default() };
         let action = decide(&agent, &LocalFood::default(), &context, &[], &[], &[], 1);
         assert!(matches!(action, Action::Give { amount, .. } if amount >= 1), "got {:?}", action);
+    }
+
+    #[test]
+    fn test_ready_pair_mates_before_building() {
+        use crate::structures::StructureType;
+        let mut agent = Agent::new("Ready".into(), 5, 5, 6);
+        agent.physical.hunger = 0.3;
+        let partner = Neighbour {
+            id: Uuid::new_v4(), name: "Partner".into(), x: 5, y: 5,
+            health: 1.0, hunger: 0.3, food: 6, strength: 1.0, relatedness: 0.0,
+        };
+        agent.reproduction.courtship_progress.insert(partner.id, 0.8);
+        let context = ActionContext {
+            strength: 1.0,
+            mating_food_cost: 5,
+            unfinished_project: Some((5, 5, StructureType::LeanTo, 50)),
+            neighbours: vec![partner.clone()],
+            ..Default::default()
+        };
+        let action = decide(&agent, &LocalFood::default(), &context, &[], &[], &[], 1);
+        assert!(matches!(action, Action::Mate { target } if target == partner.id), "got {:?}", action);
+
+        // ...but never with kin
+        let kin = Neighbour { relatedness: 0.5, ..partner };
+        let context = ActionContext { neighbours: vec![kin], ..context };
+        let action = decide(&agent, &LocalFood::default(), &context, &[], &[], &[], 1);
+        assert!(!matches!(action, Action::Mate { .. }), "got {:?}", action);
     }
 
     #[test]
