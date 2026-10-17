@@ -163,9 +163,9 @@ log_thoughts = true
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
-max_tokens = 500
-temperature = 0.7
+model = "claude-sonnet-5-5"
+max_tokens = 16000
+effort = "low"
 ```
 
 ## Running the MVP

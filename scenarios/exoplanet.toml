@@ -68,7 +68,7 @@ description = "Native life hibernates. Quiet but lean times."
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-5-5"
 api_key_env = "ANTHROPIC_API_KEY"
-max_tokens = 500
-temperature = 0.7
+max_tokens = 16000         # includes thinking; you pay only for tokens used
+effort = "low"             # low | medium | high | xhigh | max

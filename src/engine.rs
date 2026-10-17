@@ -622,7 +622,10 @@ impl Engine {
                         (0, 0)
                     };
 
-                    if taken > 0 {
+                    if taken == 0 {
+                        // Log failed attempts too, so the event stream reflects every action
+                        self.log_and_track(Event::gathered(epoch, agent_id, 0))?;
+                    } else {
                         self.agents[agent_idx].add_food(taken);
                         // Gathering energy cost affected by age (elderly use more energy)
                         let gather_cost = 0.1 / age_mod;

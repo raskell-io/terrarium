@@ -448,10 +448,12 @@ impl EventView {
             EventType::Gathered => {
                 let name = agent_name(event.agent?);
                 let amount = event.data.amount?;
-                (
-                    format!("{} gathered {} food", name, amount),
-                    EventViewType::Gathering,
-                )
+                let text = if amount == 0 {
+                    format!("{} searched for food but found none", name)
+                } else {
+                    format!("{} gathered {} food", name, amount)
+                };
+                (text, EventViewType::Gathering)
             }
             EventType::Ate => {
                 let name = agent_name(event.agent?);

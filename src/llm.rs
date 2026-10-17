@@ -14,7 +14,12 @@ pub struct LlmConfig {
     pub model: String,
     pub api_key_env: String,
     pub max_tokens: usize,
-    pub temperature: f64,
+    /// Sampling temperature. Leave unset for current models, which reject non-default values.
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    /// Thinking effort: low, medium, high, xhigh, max (unset = model default)
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 /// LLM client for agent deliberation
@@ -28,9 +33,19 @@ pub struct LlmClient {
 struct AnthropicRequest {
     model: String,
     max_tokens: usize,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_config: Option<OutputConfig>,
+    /// Server-side retry on another model if a safety classifier declines
+    fallbacks: &'static str,
     system: String,
     messages: Vec<Message>,
+}
+
+#[derive(Serialize)]
+struct OutputConfig {
+    effort: String,
 }
 
 #[derive(Serialize)]
@@ -42,10 +57,15 @@ struct Message {
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<ContentBlock>,
+    stop_reason: Option<String>,
 }
 
+/// Responses may include thinking blocks before the text block
 #[derive(Deserialize)]
 struct ContentBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
     text: String,
 }
 
@@ -105,7 +125,13 @@ impl LlmClient {
             credits_owed,
             my_proposals,
         );
-        let response = self.call_api(&prompt).await?;
+        let response = match self.call_api(&prompt).await {
+            Ok(response) => response,
+            Err(e) => {
+                warn!("LLM call failed for {}: {}. Using heuristic.", agent.name(), e);
+                return Ok(heuristic_action(agent, local_food, nearby_agents, pending_trades, debts_owed));
+            }
+        };
 
         debug!("Agent {} reasoning: {}", agent.name(), response);
 
@@ -312,6 +338,8 @@ ACTION: GATHER"#,
             model: self.config.model.clone(),
             max_tokens: self.config.max_tokens,
             temperature: self.config.temperature,
+            output_config: self.config.effort.clone().map(|effort| OutputConfig { effort }),
+            fallbacks: "default",
             system: "You are a person living in a small world. You make decisions based on your personality, needs, and goals. Be consistent with your character. Respond concisely.".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -324,6 +352,7 @@ ACTION: GATHER"#,
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "server-side-fallback-2026-07-01")
             .header("content-type", "application/json")
             .json(&request)
             .send()
@@ -337,10 +366,17 @@ ACTION: GATHER"#,
 
         let response: AnthropicResponse = response.json().await?;
 
+        match response.stop_reason.as_deref() {
+            Some("refusal") => return Err(anyhow!("Request declined (refusal)")),
+            Some("max_tokens") => warn!("LLM response hit max_tokens; consider raising it"),
+            _ => {}
+        }
+
         response
             .content
-            .first()
-            .map(|c| c.text.clone())
+            .into_iter()
+            .find(|c| c.kind == "text" && !c.text.is_empty())
+            .map(|c| c.text)
             .ok_or_else(|| anyhow!("Empty response"))
     }
 }
@@ -750,10 +786,44 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             provider: "anthropic".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: "claude-sonnet-5-5".to_string(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
-            max_tokens: 500,
-            temperature: 0.7,
+            max_tokens: 16000,
+            temperature: None,
+            effort: Some("low".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_request_omits_unset_temperature() {
+        let config = LlmConfig::default();
+        let request = AnthropicRequest {
+            model: config.model,
+            max_tokens: config.max_tokens,
+            temperature: config.temperature,
+            output_config: config.effort.map(|effort| OutputConfig { effort }),
+            fallbacks: "default",
+            system: String::new(),
+            messages: vec![],
+        };
+        let json = serde_json::to_value(&request).unwrap();
+        assert!(json.get("temperature").is_none());
+        assert_eq!(json["output_config"]["effort"], "low");
+        assert_eq!(json["fallbacks"], "default");
+    }
+
+    #[test]
+    fn test_response_skips_thinking_block() {
+        let body = r#"{"content":[{"type":"thinking","thinking":"","signature":"x"},
+                                  {"type":"text","text":"ACTION: GATHER"}],
+                       "stop_reason":"end_turn"}"#;
+        let response: AnthropicResponse = serde_json::from_str(body).unwrap();
+        let text = response.content.into_iter().find(|c| c.kind == "text").map(|c| c.text);
+        assert_eq!(text.as_deref(), Some("ACTION: GATHER"));
     }
 }
