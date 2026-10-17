@@ -320,10 +320,10 @@ mod tests {
         world.decay_food(1.0);
         assert_eq!(total(&world), 0);
 
-        // Expected regrowth 0.3 per cell: random rounding keeps the total near 30,
-        // where rounding up would have given exactly 100
+        // Capacity is 20, so expected regrowth is 0.6 per cell: random rounding keeps
+        // the total near 60 (sd ~5), where rounding up would have given exactly 100
         world.regenerate_resources(0.1, 0.3);
-        assert!((10..=60).contains(&total(&world)), "got {}", total(&world));
+        assert!((35..=85).contains(&total(&world)), "got {}", total(&world));
     }
 
     #[test]
