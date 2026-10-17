@@ -1,0 +1,138 @@
+# Great Valley
+# Scale scenario: 50 agents scattered over a 30x30 land of valleys, uplands and lakes
+
+[meta]
+name = "Great Valley"
+description = """
+Fifty people scattered across a wide land of green valleys, barren uplands
+and lakes, a day's walk or more apart. Will they find each other?
+"""
+
+[world]
+width = 30
+height = 30
+fertile_fraction = 0.3      # 30% of land cells produce food
+# clustering = 2            # Smoothing passes: 0 scatters fertile cells, more makes larger valleys
+initial_food_per_fertile = 15
+food_regen_rate = 0.1       # 10% of capacity per epoch
+
+# Building materials (defaults shown)
+# [world.materials]
+# wood_per_fertile = 30     # Wood and fiber a fertile cell holds when fully grown
+# wood_regrowth = 0.02      # Logistic rate: growth = r * W * (1 - W/K); meadow to forest in ~a year
+# stone_per_barren = 40     # Finite: quarried stone never comes back
+
+# Wild game (defaults shown)
+# [world.wildlife]
+# game_per_fertile = 2.0    # Animals a fertile cell supports
+# game_per_barren = 0.3     # ...and a barren one
+# growth = 0.03             # Logistic breeding rate per day, scaled by season
+# dispersal = 0.1           # Share of each herd that wanders to neighbouring cells daily
+
+# Lakes; laid out before land, so fertile_fraction applies to land
+[world.water]
+lakes = 4
+lake_size = 10              # Connected cells per lake
+# fish_per_water = 15.0     # Fish (food units) a lake cell supports
+# fish_growth = 0.05        # Logistic breeding rate per day, scaled by season
+
+[agents]
+count = 50
+starting_food = 10          # Each agent starts with some food
+# starting_age = 15        # Founders' age in days (default: end of youth, i.e. prime)
+# food_spoilage = 0.05      # Fraction of carried food that rots each day (stored food keeps)
+# view_radius = 2           # How many cells away agents can see (interaction needs adjacency)
+personality = "random"      # Randomize Big Five traits
+
+# Alternatively, specify distribution:
+# [agents.personality_distribution]
+# openness = { mean = 0.5, std = 0.2 }
+# conscientiousness = { mean = 0.5, std = 0.2 }
+# extraversion = { mean = 0.5, std = 0.2 }
+# agreeableness = { mean = 0.5, std = 0.2 }
+# neuroticism = { mean = 0.5, std = 0.2 }
+
+[simulation]
+epochs = 100
+snapshot_interval = 10      # Save full state every N epochs
+log_thoughts = true         # Include agent reasoning in logs
+
+# Environment with Earth temperate seasons
+# Winter (epochs 75-100) will have scarce food and cold hazards
+[environment]
+name = "Earth (Temperate)"
+description = "A temperate Earth region with four distinct seasons."
+cycle_length = 100          # Full year = full simulation
+base_hazard = 0.1
+hazard_type = "Cold"
+gravity = 1.0
+breathable_atmosphere = true
+base_temperature = "Temperate"
+
+[[environment.phases]]
+name = "Spring"
+start = 0.0
+end = 0.25
+food_regen_modifier = 1.2
+hazard_modifier = 0.5
+energy_drain_modifier = 0.9
+movement_cost_modifier = 1.0
+description = "Plants bloom and food becomes more abundant."
+
+[[environment.phases]]
+name = "Summer"
+start = 0.25
+end = 0.5
+food_regen_modifier = 1.5
+hazard_modifier = 0.3
+energy_drain_modifier = 0.8
+movement_cost_modifier = 1.0
+description = "Warm weather and plentiful resources."
+
+[[environment.phases]]
+name = "Autumn"
+start = 0.5
+end = 0.75
+food_regen_modifier = 0.8
+hazard_modifier = 0.5
+energy_drain_modifier = 1.0
+movement_cost_modifier = 1.0
+description = "Harvest time, but resources are dwindling."
+
+[[environment.phases]]
+name = "Winter"
+start = 0.75
+end = 1.0
+food_regen_modifier = 0.05
+food_decay = 0.2            # Standing food dies back 20%/day: stores matter
+hazard_modifier = 2.0
+energy_drain_modifier = 1.5
+movement_cost_modifier = 1.3
+description = "Cold and harsh. Food is scarce."
+
+# Unpredictable weather on top of the seasons
+[environment.weather]
+drought_chance = 0.01       # Daily chance a drought begins (~1 a year)
+drought_days = [10, 20]
+drought_growth = 0.3        # Plants and wood grow at 30% of normal during a drought
+storm_chance = 0.03         # Daily chance a storm begins (a few a year)
+storm_days = [1, 2]
+storm_hazard = 0.6          # Extra exposure for anyone unsheltered
+storm_damage = 5            # Durability every structure loses per storm day
+
+# Contagious illness (SIR): close contact spreads it, survivors are immune for a while
+[disease]
+enabled = true
+spontaneous_chance = 0.002  # Daily chance of falling ill on one's own
+transmission = 0.1          # Daily chance of catching it from each sick person within one step
+sick_days = [5, 9]
+health_damage = 0.03        # Health lost per sick day
+energy_drain = 0.05
+immunity_days = 60
+
+[llm]
+provider = "anthropic"
+model = "claude-sonnet-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 16000         # includes thinking; you pay only for tokens used
+effort = "low"             # low | medium | high | xhigh | max

@@ -189,7 +189,8 @@ terrarium/
 │       ├── ui.rs         # Rendering
 │       └── input.rs      # Key handling
 ├── scenarios/
-│   └── first_winter.toml
+│   ├── first_winter.toml # MVP: 10 agents, 10x10
+│   └── great_valley.toml # Scale: 50 agents, 30x30, lakes
 ├── output/               # Generated
 │   ├── events.jsonl
 │   ├── states/

@@ -15,6 +15,14 @@ fertile_fraction = 0.2      # Hydroponics bays are limited
 initial_food_per_fertile = 10
 food_regen_rate = 0.08      # Slower growing in artificial conditions
 
+# No open water or wild game here
+[world.water]
+lakes = 0
+
+[world.wildlife]
+game_per_fertile = 0.0
+game_per_barren = 0.0
+
 [agents]
 count = 8
 starting_food = 15          # Slightly more starting supplies

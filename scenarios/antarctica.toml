@@ -15,6 +15,14 @@ fertile_fraction = 0.15     # Very limited indoor growing
 initial_food_per_fertile = 8
 food_regen_rate = 0.05      # Very slow
 
+# No open water or wild game here
+[world.water]
+lakes = 0
+
+[world.wildlife]
+game_per_fertile = 0.0
+game_per_barren = 0.0
+
 [agents]
 count = 6
 starting_food = 20          # Well-supplied initially
