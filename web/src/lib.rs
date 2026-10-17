@@ -1,7 +1,7 @@
 //! Terrarium's terminal viewer in the browser.
 //!
 //! The same TUI as `terrarium --tui` (its app state, drawing and key handling), rendered into
-//! the page by Ratzilla and driven by the engine compiled to WebAssembly. The world comes from
+//! the page by Ratzilla's WebGL2 backend and driven by the engine compiled to WebAssembly. The world comes from
 //! the page's `#hash` (a bundled scenario id); W switches world, R starts it over.
 
 use std::cell::RefCell;
@@ -12,7 +12,8 @@ use std::task::{Context, Poll, Waker};
 
 use ratzilla::event::{KeyCode, KeyEvent};
 use ratzilla::ratatui::Terminal;
-use ratzilla::{DomBackend, WebRenderer};
+use ratzilla::backend::webgl2::WebGl2BackendOptions;
+use ratzilla::{FontAtlasConfig, WebGl2Backend, WebRenderer};
 use terrarium::config::Config;
 use terrarium::engine::Engine;
 use terrarium::tui::{self, App, Key};
@@ -130,13 +131,21 @@ fn set_hash(id: &str) {
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
+    // Report Rust panics with their message in the browser console
+    console_error_panic_hook::set_once();
     let mut app = App::new();
+    // A web page should come alive on its own; Space pauses
+    app.running = true;
     app.can_quit = false;
     app.client_keys = vec![("W", "Next world"), ("R", "Start this world over")];
     let session = Session::start(hash_scenario(), app).map_err(|e| JsValue::from_str(&e))?;
     let session = Rc::new(RefCell::new(session));
 
-    let backend = DomBackend::new().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    // WebGL2 resizes cleanly with the window (the DOM backend panics when its grid shrinks)
+    // and draws the page's own font
+    let options = WebGl2BackendOptions::new()
+        .font_atlas_config(FontAtlasConfig::dynamic(&["JetBrains Mono"], 16.0));
+    let backend = WebGl2Backend::new_with_options(options).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let mut terminal = Terminal::new(backend).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     terminal

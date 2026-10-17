@@ -16,17 +16,9 @@
       color: #e6e6e6;
     }
     body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      overflow: hidden;
     }
-    /* Ratzilla renders the terminal as a grid of preformatted rows */
-    pre {
-      margin: 0;
-      font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-      font-size: 16px;
-      line-height: 1.15;
-    }
+    canvas:focus { outline: none; }
     .loading {
       font: 16px "JetBrains Mono", Menlo, Consolas, monospace;
       color: #9a9a9a;
@@ -37,10 +29,22 @@
   <noscript>Terrarium runs in your browser and needs JavaScript and WebAssembly.</noscript>
   <script type="module">
     import init from "./pkg/terrarium_web.js";
-    init().catch((e) => {
-      document.body.textContent = "Terrarium could not start: " + e;
-      document.body.className = "loading";
-    });
+    // The terminal is drawn in JetBrains Mono, so have the font ready before it starts
+    document.fonts.load('16px "JetBrains Mono"')
+      .catch(() => {})
+      .then(() => init())
+      .then(() => {
+        // Ratzilla listens for keys on its canvas, so keep it focused: now, and after any click
+        const grid = document.querySelector("canvas");
+        const focus = () => grid && grid.focus({ preventScroll: true });
+        focus();
+        document.addEventListener("click", focus);
+        window.addEventListener("focus", focus);
+      })
+      .catch((e) => {
+        document.body.textContent = "Terrarium could not start: " + e;
+        document.body.className = "loading";
+      });
   </script>
 </body>
 </html>
