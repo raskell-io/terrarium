@@ -19,10 +19,10 @@ use terrarium::engine::Engine;
 use terrarium::tui::{self, App, Key};
 use wasm_bindgen::prelude::*;
 
-/// Scenarios shipped with the page: (id, TOML)
+/// Scenarios shipped with the page: (id, TOML); the first opens when the address names none
 const SCENARIOS: &[(&str, &str)] = &[
-    ("first_winter", include_str!("../../scenarios/first_winter.toml")),
     ("great_valley", include_str!("../../scenarios/great_valley.toml")),
+    ("first_winter", include_str!("../../scenarios/first_winter.toml")),
     ("exoplanet", include_str!("../../scenarios/exoplanet.toml")),
     ("antarctica", include_str!("../../scenarios/antarctica.toml")),
     ("mars_colony", include_str!("../../scenarios/mars_colony.toml")),

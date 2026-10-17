@@ -39,7 +39,8 @@ pub fn draw(frame: &mut Frame, engine: &Engine, app: &mut App) {
 
     // Top section: world and events side by side
     let top_constraints = if app.show_events {
-        vec![Constraint::Percentage(50), Constraint::Percentage(50)]
+        // The map gets the larger share
+        vec![Constraint::Percentage(64), Constraint::Percentage(36)]
     } else {
         vec![Constraint::Percentage(100)]
     };

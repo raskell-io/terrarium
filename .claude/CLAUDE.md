@@ -191,7 +191,7 @@ terrarium/
 ├── web/                  # The TUI in the browser (Ratzilla + WebAssembly)
 ├── scenarios/
 │   ├── first_winter.toml # MVP: 10 agents, 10x10
-│   └── great_valley.toml # Scale: 50 agents, 30x30, lakes
+│   └── great_valley.toml # Scale: 120 agents, 80x50, lakes
 ├── output/               # Generated
 │   ├── events.jsonl
 │   ├── states/

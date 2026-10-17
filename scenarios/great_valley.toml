@@ -1,16 +1,16 @@
 # Great Valley
-# Scale scenario: 50 agents scattered over a 30x30 land of valleys, uplands and lakes
+# Scale scenario: 120 agents scattered over an 80x50 land of valleys, uplands and lakes
 
 [meta]
 name = "Great Valley"
 description = """
-Fifty people scattered across a wide land of green valleys, barren uplands
-and lakes, a day's walk or more apart. Will they find each other?
+A hundred and twenty people scattered across a wide land of green valleys,
+barren uplands and lakes, days' walk apart. Will they find each other?
 """
 
 [world]
-width = 30
-height = 30
+width = 80
+height = 50
 fertile_fraction = 0.3      # 30% of land cells produce food
 # clustering = 2            # Smoothing passes: 0 scatters fertile cells, more makes larger valleys
 initial_food_per_fertile = 15
@@ -31,13 +31,13 @@ food_regen_rate = 0.1       # 10% of capacity per epoch
 
 # Lakes; laid out before land, so fertile_fraction applies to land
 [world.water]
-lakes = 4
-lake_size = 10              # Connected cells per lake
+lakes = 10
+lake_size = 14              # Connected cells per lake
 # fish_per_water = 15.0     # Fish (food units) a lake cell supports
 # fish_growth = 0.05        # Logistic breeding rate per day, scaled by season
 
 [agents]
-count = 50
+count = 120
 starting_food = 10          # Each agent starts with some food
 # starting_age = 15        # Give every founder this age in days (default: mixed adult ages)
 # food_spoilage = 0.05      # Fraction of carried food that rots each day (stored food keeps)
