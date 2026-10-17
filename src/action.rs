@@ -23,6 +23,11 @@ pub struct ActionContext {
     pub trespassers: Vec<(Uuid, String)>,
     /// This agent is standing on someone else's territory without permission
     pub is_trespassing: bool,
+    /// Someone else's stocked storehouse here or adjacent that this agent may not use:
+    /// (x, y, owner, owner name, food stored)
+    pub raid_target: Option<(usize, usize, Uuid, String, u32)>,
+    /// Owner of the territory this agent is trespassing on, if they are nearby
+    pub territory_owner_nearby: Option<Uuid>,
     /// This agent's nearest unfinished structure: (x, y, type, percent built)
     pub unfinished_project: Option<(usize, usize, StructureType, u32)>,
     /// Where this agent's nearest finished shelter or lean-to is
@@ -88,6 +93,8 @@ pub enum Action {
     DepositFood { amount: u32 },
     /// Take food out of storage
     WithdrawFood { amount: u32 },
+    /// Steal food from someone else's storage here
+    Raid,
     /// Withdraw materials from a storage structure
     Withdraw { material: MaterialType, amount: u32 },
     /// Grant access to your structure
@@ -374,6 +381,7 @@ impl Action {
             }
             // Territory actions
             "MARK" | "CLAIM" => Some(Action::Mark),
+            "RAID" | "STEAL" => Some(Action::Raid),
             "CHALLENGE" => {
                 if words.len() >= 2 {
                     let target_name = words[1].to_lowercase();
@@ -534,6 +542,7 @@ impl Action {
                 format!("{} denies {} access to their structure", agent_name, target_name)
             }
             Action::Mark => format!("{} marks territory", agent_name),
+            Action::Raid => format!("{} raids a storehouse", agent_name),
             Action::Challenge { target } => {
                 let target_name = find_name_by_id(*target, agents).unwrap_or("someone");
                 format!("{} challenges {} for trespassing", agent_name, target_name)
@@ -575,6 +584,7 @@ impl Action {
     /// can_mark_territory: whether agent can claim current cell as territory
     /// trespassers: list of trespassers the agent can challenge
     /// is_challenged: whether the agent has been challenged on someone's territory
+    /// raid_target: (owner name, food stored) of someone else's storage here
     /// pending_trade_offers: list of (index, proposer_name, offer_desc, request_desc) for received proposals
     /// my_pending_proposals: count of proposals this agent has sent
     #[allow(clippy::too_many_arguments)]
@@ -591,6 +601,7 @@ impl Action {
         can_mark_territory: bool,
         trespassers: &[(Uuid, &str)],
         is_challenged: bool,
+        raid_target: Option<(&str, u32)>,
         pending_trade_offers: &[(usize, &str, String, String)],
         my_pending_proposals: usize,
     ) -> String {
@@ -664,6 +675,13 @@ impl Action {
         if is_challenged {
             actions.push("SUBMIT - leave the territory peacefully".to_string());
             actions.push("FIGHT - fight to stay on the territory".to_string());
+        }
+
+        if let Some((owner, food)) = raid_target {
+            actions.push(format!(
+                "RAID - steal food from {}'s storehouse here ({} stored); they will fight you off if nearby",
+                owner, food
+            ));
         }
 
         if !nearby_agents.is_empty() {
@@ -889,6 +907,7 @@ mod tests {
         assert!(matches!(Action::parse("DEPOSIT food 3", &[]), Some(Action::DepositFood { amount: 3 })));
         assert!(matches!(Action::parse("WITHDRAW food", &[]), Some(Action::WithdrawFood { amount: 1 })));
         assert!(matches!(Action::parse("DEPOSIT wood 2", &[]), Some(Action::Deposit { amount: 2, .. })));
+        assert!(matches!(Action::parse("RAID", &[]), Some(Action::Raid)));
     }
 
     #[test]

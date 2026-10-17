@@ -261,6 +261,11 @@ ACTION: GATHER"#,
                 context.can_mark_territory,
                 &trespassers,
                 context.is_trespassing,
+                context
+                    .raid_target
+                    .as_ref()
+                    .filter(|(x, y, ..)| (*x, *y) == (agent.physical.x, agent.physical.y))
+                    .map(|(_, _, _, owner, food)| (owner.as_str(), *food)),
                 &pending_offer_descs,
                 my_proposals,
             ),
@@ -580,6 +585,37 @@ fn heuristic_action(
         return Action::Rest;
     }
 
+    let sentiment = |id: &uuid::Uuid| agent.beliefs.social.get(id).map(|b| b.sentiment).unwrap_or(0.0);
+    let pos = (agent.physical.x, agent.physical.y);
+    let toward = |target: (usize, usize)| crate::action::Direction::toward(pos, target).map(Action::Move);
+    let agreeableness = agent.identity.personality.agreeableness;
+
+    // Priority 3a: Hungry, unscrupulous agents raid a stocked storehouse they come across
+    // (the greediest even when not desperate), unless it belongs to a friend
+    if let Some((x, y, owner, _, _)) = &context.raid_target {
+        let tempted = (agreeableness < 0.45 && agent.physical.food < 3 && agent.physical.hunger > 0.4)
+            || (agreeableness < 0.25 && agent.physical.food < 6);
+        if tempted && sentiment(owner) < 0.5 && rng.random::<f64>() < 0.7 {
+            if (*x, *y) == pos {
+                return Action::Raid;
+            }
+            if let Some(step) = toward((*x, *y)) {
+                return step;
+            }
+        }
+    }
+
+    // Priority 3b: Caught trespassing by the owner: the hungry and belligerent fight for the land,
+    // others mostly back off
+    if context.territory_owner_nearby.is_some() && rng.random::<f64>() < 0.5 {
+        if agreeableness < 0.35 && agent.physical.health > 0.6 && agent.physical.hunger > 0.4 {
+            return Action::Fight;
+        }
+        if agreeableness >= 0.35 {
+            return Action::Submit;
+        }
+    }
+
     // Priority 3: Hungry, disagreeable agents with no food take it by force when none is in sight,
     // from whoever nearby they like least (never a friend)
     if agent.physical.food == 0
@@ -588,7 +624,6 @@ fn heuristic_action(
         && local_food.adjacent.is_empty()
         && agent.identity.personality.agreeableness < 0.4
     {
-        let sentiment = |id: &uuid::Uuid| agent.beliefs.social.get(id).map(|b| b.sentiment).unwrap_or(0.0);
         let victim = nearby_agents
             .iter()
             .filter(|(id, _)| sentiment(id) < 0.3)
@@ -598,9 +633,6 @@ fn heuristic_action(
             return Action::Attack { target: *target };
         }
     }
-
-    let pos = (agent.physical.x, agent.physical.y);
-    let toward = |target: (usize, usize)| crate::action::Direction::toward(pos, target).map(Action::Move);
 
     // Priority 4: Find food if running low, falling back on stored food when none is in reach
     if agent.physical.food < 3 {
@@ -636,6 +668,15 @@ fn heuristic_action(
         }
         if agent.physical.food < 10 && local_food.here > 0 && rng.random::<f64>() < 0.4 {
             return Action::Gather;
+        }
+    }
+    // Keep an eye on a well-stocked storehouse
+    if let Some((x, y, stored)) = context.storage {
+        let far = x.abs_diff(pos.0).max(y.abs_diff(pos.1)) > 2;
+        if stored >= 6 && far && rng.random::<f64>() < 0.25 {
+            if let Some(step) = toward((x, y)) {
+                return step;
+            }
         }
     }
     // Defend our land: disagreeable owners challenge trespassers

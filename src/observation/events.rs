@@ -29,6 +29,7 @@ pub enum EventType {
 
     // Conflict
     Attacked,
+    Raided,
     AllyIntervened,
 
     // Groups
@@ -295,6 +296,21 @@ impl Event {
             data: EventData {
                 damage: Some(damage),
                 amount: Some(seized),
+                ..EventData::empty()
+            },
+        }
+    }
+
+    /// A storehouse raid: `amount` food stolen, or `damage` taken when the owner fought the raider off
+    pub fn raided(epoch: usize, raider: Uuid, owner: Uuid, amount: u32, damage: Option<f64>) -> Self {
+        Self {
+            epoch,
+            event_type: EventType::Raided,
+            agent: Some(raider),
+            target: Some(owner),
+            data: EventData {
+                amount: Some(amount),
+                damage,
                 ..EventData::empty()
             },
         }

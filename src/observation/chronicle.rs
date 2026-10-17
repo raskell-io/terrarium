@@ -130,6 +130,15 @@ impl Chronicle {
                     _ => Some(format!("**{}** attacked **{}**!", agent, target)),
                 }
             }
+            EventType::Raided => {
+                let agent = agent_name?;
+                let target = target_name?;
+                if event.data.damage.is_some() {
+                    Some(format!("**{}** tried to raid **{}**'s storehouse and was fought off.", agent, target))
+                } else {
+                    Some(format!("**{}** raided **{}**'s storehouse and stole {} food!", agent, target, event.data.amount.unwrap_or(0)))
+                }
+            }
             EventType::AllyIntervened => {
                 let target = target_name?;
                 let ally_name = event.data.ally.and_then(|id| self.agent_names.get(&id))?;

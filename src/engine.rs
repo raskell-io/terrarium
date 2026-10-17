@@ -1808,6 +1808,86 @@ impl Engine {
                     }
                 }
 
+                Action::Raid => {
+                    let pos = (self.agents[agent_idx].physical.x, self.agents[agent_idx].physical.y);
+                    let Some((owner, stored)) = self
+                        .world
+                        .get(pos.0, pos.1)
+                        .and_then(|c| c.structure.as_ref())
+                        .filter(|s| s.structure_type.has_storage() && s.is_complete() && !s.can_use(agent_id))
+                        .map(|s| (s.owner, s.inventory.as_ref().map_or(0, |i| i.food)))
+                    else {
+                        continue;
+                    };
+                    if stored == 0 {
+                        continue;
+                    }
+                    let raider_name = self.agents[agent_idx].name().to_string();
+                    let owner_idx = self.agents.iter().position(|a| a.id == owner && a.is_alive());
+                    let owner_present = owner_idx.is_some_and(|o| is_adjacent(&self.agents[agent_idx], &self.agents[o]));
+
+                    // An owner on guard fights the raider off half the time
+                    if owner_present && rand::random::<f64>() < 0.5 {
+                        let o = owner_idx.unwrap();
+                        let damage = 0.15 + rand::random::<f64>() * 0.1;
+                        self.agents[agent_idx].take_damage(damage);
+                        self.log_and_track(Event::raided(epoch, agent_id, owner, 0, Some(damage)))?;
+                        let owner_name = self.agents[o].name().to_string();
+                        self.agents[agent_idx].memory.remember(Episode::conflict(
+                            epoch, &format!("I tried to raid {}'s storehouse but was fought off", owner_name), -0.6, owner,
+                        ));
+                        self.agents[o].memory.remember(Episode::conflict(
+                            epoch, &format!("I fought {} off my storehouse", raider_name), -0.3, agent_id,
+                        ));
+                        self.agents[o].beliefs.update_trust(agent_id, &raider_name, -0.4, epoch);
+                        self.agents[o].beliefs.update_sentiment(agent_id, &raider_name, -0.3, epoch);
+                        if !self.agents[agent_idx].is_alive() {
+                            self.log_and_track(Event::died(epoch, agent_id, &format!("killed raiding {}'s storehouse", owner_name)))?;
+                        }
+                        continue;
+                    }
+
+                    let stolen = self
+                        .world
+                        .get_mut(pos.0, pos.1)
+                        .and_then(|c| c.structure.as_mut())
+                        .and_then(|s| s.inventory.as_mut())
+                        .map_or(0, |inv| inv.remove_food(6));
+                    self.agents[agent_idx].add_food(stolen);
+                    self.log_and_track(Event::raided(epoch, agent_id, owner, stolen, None))?;
+                    debug!("{} raided a storehouse and stole {} food", raider_name, stolen);
+
+                    let owner_name = self.agent_name(owner);
+                    self.agents[agent_idx].memory.remember(Episode::conflict(
+                        epoch, &format!("I stole {} food from {}'s storehouse", stolen, owner_name), 0.2, owner,
+                    ));
+                    // The owner knows who did it if they saw it; otherwise only that food is gone.
+                    // Anyone else nearby saw it too.
+                    if let Some(o) = owner_idx {
+                        if owner_present {
+                            self.agents[o].memory.remember(Episode::conflict(
+                                epoch, &format!("{} stole {} food from my storehouse!", raider_name, stolen), -0.8, agent_id,
+                            ));
+                            self.agents[o].beliefs.update_trust(agent_id, &raider_name, -0.5, epoch);
+                            self.agents[o].beliefs.update_sentiment(agent_id, &raider_name, -0.5, epoch);
+                        } else {
+                            self.agents[o].memory.remember(Episode::survival(
+                                epoch, &format!("Someone stole {} food from my storehouse", stolen), -0.6,
+                            ));
+                        }
+                    }
+                    let witnesses: Vec<usize> = (0..self.agents.len())
+                        .filter(|&i| i != agent_idx && Some(i) != owner_idx)
+                        .filter(|&i| self.agents[i].is_alive() && is_adjacent(&self.agents[i], &self.agents[agent_idx]))
+                        .collect();
+                    for w in witnesses {
+                        self.agents[w].memory.remember(Episode::social(
+                            epoch, &format!("I saw {} steal from {}'s storehouse", raider_name, owner_name), -0.3, agent_id,
+                        ));
+                        self.agents[w].beliefs.update_trust(agent_id, &raider_name, -0.2, epoch);
+                    }
+                }
+
                 Action::Mark => {
                     use crate::world::TerritoryClaim;
 
@@ -2917,6 +2997,20 @@ impl Engine {
                 .find(|c| c.terrain == Terrain::Barren).map(|c| (c.x, c.y)),
             adjacent_fertile: self.world.adjacent(pos.0, pos.1).iter()
                 .find(|c| c.terrain == Terrain::Fertile).map(|c| (c.x, c.y)),
+            raid_target: self
+                .world
+                .cells
+                .iter()
+                .filter(|c| c.x.abs_diff(pos.0) <= 1 && c.y.abs_diff(pos.1) <= 1)
+                .filter_map(|c| c.structure.as_ref().map(|s| (c, s)))
+                .filter(|(_, s)| s.structure_type.has_storage() && s.is_complete() && !s.can_use(agent.id))
+                .filter_map(|(c, s)| s.inventory.as_ref().filter(|i| i.food > 0).map(|i| (c, s, i.food)))
+                .min_by_key(|(c, ..)| (c.x, c.y) != pos)
+                .map(|(c, s, food)| (c.x, c.y, s.owner, self.agent_name(s.owner), food)),
+            territory_owner_nearby: territory
+                .filter(|t| t.owner != agent.id && !t.allowed_guests.contains(&agent.id))
+                .filter(|t| self.agents.iter().any(|a| a.id == t.owner && a.is_alive() && is_adjacent(a, agent)))
+                .map(|t| t.owner),
             unfinished_here_owner: structure
                 .filter(|s| s.owner != agent.id && !s.is_complete())
                 .map(|s| (s.owner, self.agent_name(s.owner))),
@@ -3980,6 +4074,29 @@ mod tests {
         assert_eq!((engine.agents[1].physical.food, stored(&engine)), (10, 6));
         engine.resolve_actions(3, HashMap::from([(a, Action::WithdrawFood { amount: 5 })])).unwrap();
         assert_eq!((engine.agents[0].physical.food, stored(&engine)), (9, 1));
+    }
+
+    #[test]
+    fn test_raid_unguarded_storehouse() {
+        use crate::structures::{Structure, StructureType};
+        let (mut engine, a, b) = courting_pair("raid");
+        let mut storage = Structure::new(StructureType::Storage, a, 20, ToolQuality::Standard, 0);
+        storage.add_progress(20, 0);
+        storage.inventory.as_mut().unwrap().add_food(10);
+        engine.world.get_mut(5, 5).unwrap().structure = Some(storage);
+        engine.agents[0].physical.x = 0; // the owner is away
+
+        let context = engine.action_context(&engine.agents[1]);
+        assert_eq!(context.raid_target.map(|(x, y, owner, _, food)| (x, y, owner, food)), Some((5, 5, a, 10)));
+        assert!(engine.action_context(&engine.agents[0]).raid_target.is_none());
+
+        engine.resolve_actions(1, HashMap::from([(b, Action::Raid)])).unwrap();
+        assert_eq!(engine.agents[1].physical.food, 16);
+        let left = engine.world.get(5, 5).unwrap().structure.as_ref().unwrap().inventory.as_ref().unwrap().food;
+        assert_eq!(left, 4);
+        assert!(engine.recent_events.iter().any(|e| matches!(e.event_type, crate::observation::EventType::Raided)));
+        // Unseen, the owner can't tell who did it
+        assert!(engine.agents[0].beliefs.social.get(&b).is_none_or(|s| s.trust >= 0.0));
     }
 
     #[test]
