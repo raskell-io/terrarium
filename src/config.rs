@@ -164,6 +164,13 @@ impl Default for AgingConfig {
     }
 }
 
+impl AgingConfig {
+    /// Fertile from the end of youth to the end of prime (always, if aging is off)
+    pub fn is_fertile(&self, age: usize) -> bool {
+        !self.enabled || (self.youth_end..self.prime_end).contains(&age)
+    }
+}
+
 fn default_aging_enabled() -> bool { true }
 fn default_youth_end() -> usize { 15 }
 fn default_prime_end() -> usize { 60 }

@@ -2973,6 +2973,7 @@ impl Engine {
                 .collect(),
             strength: agent.physical.health * agent.age_modifier(&self.config.aging),
             mating_food_cost: if self.config.reproduction.enabled { self.config.reproduction.mating_food_cost } else { 0 },
+            fertile: self.config.reproduction.enabled && self.config.aging.is_fertile(agent.physical.age),
             claimed_cells: self
                 .world
                 .cells
@@ -3157,6 +3158,12 @@ impl Engine {
         }
 
         // Check mating cooldowns
+        if !self.config.aging.is_fertile(self.agents[idx_a].physical.age)
+            || !self.config.aging.is_fertile(self.agents[idx_b].physical.age)
+        {
+            return mating_failed(&self.agents[idx_a], &self.agents[idx_b], "not of fertile age");
+        }
+
         if self.agents[idx_a].reproduction.mating_cooldown > 0
             || self.agents[idx_b].reproduction.mating_cooldown > 0
         {
@@ -4025,6 +4032,17 @@ mod tests {
         engine.agents[0].physical.enter_shelter(5, 5);
         engine.resolve_actions(1, HashMap::from([(a, Action::Move(Direction::North))])).unwrap();
         assert!(engine.agents[0].physical.sheltered_at.is_none());
+    }
+
+    #[test]
+    fn test_elders_cannot_conceive() {
+        let (mut engine, a, b) = courting_pair("elder");
+        engine.agents[0].physical.age = engine.config.aging.prime_end;
+        let actions = HashMap::from([(a, Action::Mate { target: b }), (b, Action::Mate { target: a })]);
+        engine.resolve_mating(1, &actions).unwrap();
+        assert!(!expecting(&engine));
+        assert!(!engine.action_context(&engine.agents[0]).fertile);
+        assert!(engine.action_context(&engine.agents[1]).fertile);
     }
 
     #[test]

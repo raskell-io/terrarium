@@ -438,17 +438,20 @@ fn provision(
 /// Food an agent able to breed and courting keeps for mating (capital breeders build reserves first)
 fn breeding_reserve(agent: &Agent, context: &ActionContext) -> u32 {
     let courting = agent.reproduction.courtship_progress.values().any(|&p| p >= 0.3);
-    if can_reproduce(agent) && courting { context.mating_food_cost } else { 0 }
+    if can_reproduce(agent, context) && courting { context.mating_food_cost } else { 0 }
 }
 
-fn can_reproduce(agent: &Agent) -> bool {
-    agent.reproduction.mating_cooldown == 0 && agent.reproduction.gestation.is_none() && agent.physical.health > 0.5
+fn can_reproduce(agent: &Agent, context: &ActionContext) -> bool {
+    context.fertile
+        && agent.reproduction.mating_cooldown == 0
+        && agent.reproduction.gestation.is_none()
+        && agent.physical.health > 0.5
 }
 
 /// Breed when reserves allow (capital breeding): in good condition, able to pay for it, and with
 /// a partner who is here, never kin (the Westermarck effect)
 fn mate(agent: &Agent, context: &ActionContext, mate_proposals: &[(Uuid, &str)]) -> Option<Action> {
-    let ready = can_reproduce(agent)
+    let ready = can_reproduce(agent, context)
         && Body::of(agent).value() >= BREEDING_RESERVE
         && agent.physical.food >= context.mating_food_cost;
     if !ready {
@@ -478,7 +481,7 @@ fn socialise(agent: &Agent, context: &ActionContext, epoch: usize, rng: &mut imp
     // Kin are never mates (the Westermarck effect)
     let unrelated = |id: &Uuid| neighbours.iter().any(|n| n.id == *id && n.relatedness == 0.0);
 
-    let can_reproduce = can_reproduce(agent);
+    let can_reproduce = can_reproduce(agent, context);
 
     // Courtship follows familiarity and liking (propinquity): keep courting a current partner,
     // the sociable sometimes start with whoever nearby they like best
@@ -710,6 +713,7 @@ mod tests {
         let context = ActionContext {
             strength: 1.0,
             mating_food_cost: 5,
+            fertile: true,
             unfinished_project: Some((5, 5, StructureType::LeanTo, 50)),
             neighbours: vec![partner.clone()],
             ..Default::default()

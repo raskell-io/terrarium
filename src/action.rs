@@ -45,6 +45,8 @@ pub struct ActionContext {
     pub raid_target: Option<(usize, usize, Uuid, String, u32)>,
     /// Owner of the territory this agent is trespassing on, if they are nearby
     pub territory_owner_nearby: Option<Uuid>,
+    /// Of an age to have children (and reproduction is on)
+    pub fertile: bool,
     /// Food each partner must spend to mate (0 if reproduction is off)
     pub mating_food_cost: u32,
     /// Everyone within one step, as this agent sees them
@@ -717,7 +719,7 @@ impl Action {
                 actions.push("GOSSIP <name> <about> - share your opinion about <about> with <name>".to_string());
             }
             actions.push("COURT <name> - court someone nearby (builds courtship over time)".to_string());
-            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent and sufficient courtship)".to_string());
+            actions.push("MATE <name> - attempt to mate with someone (requires mutual consent, sufficient courtship, and both partners past youth but not yet elderly)".to_string());
 
             // Show TEACH if agent has teachable skills
             if !teachable_skills.is_empty() {
