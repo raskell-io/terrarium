@@ -195,6 +195,13 @@ pub struct SkillsConfig {
     pub min_level_to_teach: f64,
 }
 
+impl SkillsConfig {
+    /// Skill gained per practice action (0 when skills are disabled)
+    pub fn practice_gain(&self) -> f64 {
+        if self.enabled { self.practice_improvement } else { 0.0 }
+    }
+}
+
 impl Default for SkillsConfig {
     fn default() -> Self {
         Self {

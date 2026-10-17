@@ -179,9 +179,17 @@ impl Skills {
     }
 
     /// Mark a skill as practiced this epoch
-    pub fn practice(&mut self, skill: &str, epoch: usize) {
-        if self.levels.contains_key(skill) {
-            self.last_practiced.insert(skill.to_string(), epoch);
+    pub fn practice(&mut self, skill: &str, amount: f64, epoch: usize) {
+        self.improve(skill, amount, epoch);
+    }
+
+    /// Unused skills fade: lose `rate` once not practiced for `threshold` epochs
+    pub fn decay_unused(&mut self, rate: f64, threshold: usize, epoch: usize) {
+        for (name, level) in self.levels.iter_mut() {
+            let last = self.last_practiced.get(name).copied().unwrap_or(0);
+            if epoch.saturating_sub(last) >= threshold {
+                *level = (*level - rate).max(0.0);
+            }
         }
     }
 

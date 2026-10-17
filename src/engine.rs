@@ -509,6 +509,7 @@ impl Engine {
         // 6. Tick reproduction systems
         self.tick_gestations(epoch)?;
         self.tick_courtship_decay();
+        self.tick_skill_decay(epoch);
         self.process_births();
 
         // 7. Tick aging (after reproduction so newborns get their first epoch)
@@ -651,7 +652,7 @@ impl Engine {
                             (self.agents[agent_idx].physical.energy - gather_cost).max(0.0);
 
                         // Practice foraging skill when gathering
-                        self.agents[agent_idx].skills.practice("foraging", epoch);
+                        self.agents[agent_idx].skills.practice("foraging", self.config.skills.practice_gain(), epoch);
 
                         self.log_and_track(Event::gathered(epoch, agent_id, taken))?;
 
@@ -736,7 +737,7 @@ impl Engine {
                             ))?;
 
                             // Practice leadership when speaking
-                            self.agents[agent_idx].skills.practice("leadership", epoch);
+                            self.agents[agent_idx].skills.practice("leadership", self.config.skills.practice_gain(), epoch);
 
                             // Both agents remember the interaction
                             let agent_name = self.agents[agent_idx].name().to_string();
@@ -815,7 +816,7 @@ impl Engine {
                                 ));
 
                                 // Practice leadership when giving
-                                self.agents[agent_idx].skills.practice("leadership", epoch);
+                                self.agents[agent_idx].skills.practice("leadership", self.config.skills.practice_gain(), epoch);
 
                                 // Update trust (giver gets leadership bonus)
                                 self.agents[target_idx].beliefs.update_trust(
@@ -950,7 +951,7 @@ impl Engine {
                             let about_name = self.agents[about_idx].name().to_string();
 
                             // Practice diplomacy when gossiping
-                            self.agents[agent_idx].skills.practice("diplomacy", epoch);
+                            self.agents[agent_idx].skills.practice("diplomacy", self.config.skills.practice_gain(), epoch);
 
                             // Target receives the gossip and updates their belief
                             let sentiment_desc = self.agents[target_idx].beliefs.receive_gossip(
@@ -1129,9 +1130,7 @@ impl Engine {
                                 self.agents[target_idx].skills.improve(&skill, improvement, epoch);
 
                                 // Teacher practices teaching skill
-                                self.agents[agent_idx].skills.practice("teaching", epoch);
-                                let practice_imp = self.config.skills.practice_improvement;
-                                self.agents[agent_idx].skills.improve("teaching", practice_imp * 0.5, epoch);
+                                self.agents[agent_idx].skills.practice("teaching", self.config.skills.practice_gain(), epoch);
 
                                 // Energy cost for teaching
                                 self.agents[agent_idx].physical.energy =
@@ -1226,7 +1225,7 @@ impl Engine {
                         }
 
                         // Practice foraging
-                        self.agents[agent_idx].skills.practice("foraging", epoch);
+                        self.agents[agent_idx].skills.practice("foraging", self.config.skills.practice_gain(), epoch);
 
                         // Energy cost
                         self.agents[agent_idx].physical.energy =
@@ -1289,7 +1288,7 @@ impl Engine {
                             self.agents[agent_idx].physical.tools.push(new_tool);
 
                             // Practice crafting
-                            self.agents[agent_idx].skills.practice("crafting", epoch);
+                            self.agents[agent_idx].skills.practice("crafting", self.config.skills.practice_gain(), epoch);
                             let improvement = 0.02 + recipe.min_crafting_skill * 0.05;
                             self.agents[agent_idx].skills.improve("crafting", improvement, epoch);
 
@@ -1353,7 +1352,7 @@ impl Engine {
                         }
 
                         // Practice hunting
-                        self.agents[agent_idx].skills.practice("hunting", epoch);
+                        self.agents[agent_idx].skills.practice("hunting", self.config.skills.practice_gain(), epoch);
                         self.agents[agent_idx].skills.improve("hunting", 0.03, epoch);
 
                         // Use tool durability
@@ -1369,7 +1368,7 @@ impl Engine {
                         ));
                     } else {
                         // Failed hunt
-                        self.agents[agent_idx].skills.practice("hunting", epoch);
+                        self.agents[agent_idx].skills.practice("hunting", self.config.skills.practice_gain(), epoch);
 
                         // Still uses energy and tool durability
                         self.agents[agent_idx].physical.use_tool_for_action("hunt");
@@ -1402,7 +1401,7 @@ impl Engine {
                         self.agents[agent_idx].add_food(food_gained);
 
                         // Practice foraging
-                        self.agents[agent_idx].skills.practice("foraging", epoch);
+                        self.agents[agent_idx].skills.practice("foraging", self.config.skills.practice_gain(), epoch);
 
                         // Use tool durability
                         self.agents[agent_idx].physical.use_tool_for_action("fish");
@@ -1444,7 +1443,7 @@ impl Engine {
                     self.agents[agent_idx].physical.add_material(MaterialType::Wood, wood_amount);
 
                     // Practice foraging
-                    self.agents[agent_idx].skills.practice("foraging", epoch);
+                    self.agents[agent_idx].skills.practice("foraging", self.config.skills.practice_gain(), epoch);
 
                     // Use tool durability
                     self.agents[agent_idx].physical.use_tool_for_action("chop");
@@ -1509,7 +1508,7 @@ impl Engine {
                                 s.add_progress(progress, epoch);
 
                                 // Practice crafting
-                                self.agents[agent_idx].skills.practice("crafting", epoch);
+                                self.agents[agent_idx].skills.practice("crafting", self.config.skills.practice_gain(), epoch);
                                 self.agents[agent_idx].physical.energy =
                                     (self.agents[agent_idx].physical.energy - 0.15).max(0.0);
 
@@ -1569,7 +1568,7 @@ impl Engine {
                         }
 
                         // Practice crafting
-                        self.agents[agent_idx].skills.practice("crafting", epoch);
+                        self.agents[agent_idx].skills.practice("crafting", self.config.skills.practice_gain(), epoch);
                         self.agents[agent_idx].physical.energy =
                             (self.agents[agent_idx].physical.energy - 0.2).max(0.0);
 
@@ -2739,6 +2738,17 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    /// Unused skills fade over time
+    fn tick_skill_decay(&mut self, epoch: usize) {
+        if !self.config.skills.enabled {
+            return;
+        }
+        let (rate, threshold) = (self.config.skills.decay_rate, self.config.skills.decay_threshold_epochs);
+        for agent in self.agents.iter_mut().filter(|a| a.is_alive()) {
+            agent.skills.decay_unused(rate, threshold, epoch);
+        }
     }
 
     /// Decay courtship scores each epoch
