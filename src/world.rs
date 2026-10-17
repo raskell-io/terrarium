@@ -50,6 +50,46 @@ pub fn random_round(x: f64, rng: &mut impl RngExt) -> u32 {
     if rng.random::<f64>() < x.fract() { base + 1 } else { base }
 }
 
+/// Which land cells are fertile. A random fertility field is smoothed `clustering` times
+/// (each cell averaged with its neighbours), land beside water gets a boost, and the most
+/// fertile `fertile_fraction` of land becomes fertile, so the fraction is exact and patchy
+fn fertile_land(config: &WorldConfig, water: &[bool], rng: &mut impl RngExt) -> Vec<bool> {
+    let (w, h) = (config.width, config.height);
+    let neighbours = |i: usize| {
+        let (x, y) = ((i % w) as i64, (i / w) as i64);
+        (-1..=1)
+            .flat_map(move |dy| (-1..=1).map(move |dx| (x + dx, y + dy)))
+            .filter(move |&(nx, ny)| (nx, ny) != (x, y) && nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64)
+            .map(move |(nx, ny)| ny as usize * w + nx as usize)
+    };
+    // Smooth on a field that wraps around the edges, so every cell averages the same number of
+    // values; otherwise edge cells vary more and crowd the extremes (land would hug the border)
+    let wrapped = |i: usize| {
+        let (x, y) = ((i % w) as i64, (i / w) as i64);
+        (-1..=1).flat_map(move |dy| {
+            (-1..=1).map(move |dx| ((y + dy).rem_euclid(h as i64) as usize) * w + (x + dx).rem_euclid(w as i64) as usize)
+        })
+    };
+    let mut field: Vec<f64> = (0..w * h).map(|_| rng.random::<f64>()).collect();
+    for _ in 0..config.clustering {
+        field = (0..w * h).map(|i| wrapped(i).map(|j| field[j]).sum::<f64>() / 9.0).collect();
+    }
+    // Shores are greener
+    for i in 0..w * h {
+        if !water[i] && neighbours(i).any(|j| water[j]) {
+            field[i] += 0.2;
+        }
+    }
+    let mut land: Vec<usize> = (0..w * h).filter(|&i| !water[i]).collect();
+    land.sort_by(|&a, &b| field[b].total_cmp(&field[a]));
+    let count = (land.len() as f64 * config.fertile_fraction).round() as usize;
+    let mut fertile = vec![false; w * h];
+    for &i in land.iter().take(count) {
+        fertile[i] = true;
+    }
+    fertile
+}
+
 /// Flood a lake of `size` orthogonally connected cells outward from a random dry cell
 fn dig_lake(water: &mut [bool], width: usize, height: usize, size: usize, rng: &mut impl RngExt) {
     let dry: Vec<usize> = (0..water.len()).filter(|&i| !water[i]).collect();
@@ -142,7 +182,13 @@ pub struct WorldConfig {
     pub wildlife: WildlifeConfig,
     #[serde(default)]
     pub water: WaterConfig,
+    /// Smoothing passes over the fertility field: 0 scatters fertile cells at random,
+    /// more passes gather them into larger patches (valleys) with barren uplands between
+    #[serde(default = "default_clustering")]
+    pub clustering: usize,
 }
+
+fn default_clustering() -> usize { 2 }
 
 /// Lakes and their fish
 #[derive(Debug, Clone, Deserialize)]
@@ -250,11 +296,13 @@ impl World {
             dig_lake(&mut water, config.width, config.height, config.water.lake_size, &mut rng);
         }
 
+        let fertile = fertile_land(config, &water, &mut rng);
+
         for y in 0..config.height {
             for x in 0..config.width {
                 let terrain = if water[y * config.width + x] {
                     Terrain::Water
-                } else if rng.random::<f64>() < config.fertile_fraction {
+                } else if fertile[y * config.width + x] {
                     Terrain::Fertile
                 } else {
                     Terrain::Barren
@@ -675,6 +723,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.food).sum::<u32>();
@@ -701,6 +750,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.wood).sum::<u32>();
@@ -734,6 +784,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig { growth: 0.0, ..WildlifeConfig::default() },
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let mut world = World::new(&config);
         let total = |w: &World| w.cells.iter().map(|c| c.game).sum::<f64>();
@@ -773,6 +824,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 1, lake_size: 6, ..WaterConfig::default() },
+            clustering: 2,
         };
         for _ in 0..20 {
             let world = World::new(&config);
@@ -799,6 +851,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig { game_per_barren: 0.0, ..WildlifeConfig::default() },
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let mut world = World::new(&config);
         world.get_mut(7, 3).unwrap().terrain = Terrain::Water;
@@ -813,6 +866,59 @@ mod tests {
     }
 
     #[test]
+    fn test_fertile_land_comes_in_patches() {
+        // Share of a fertile cell's neighbours that are fertile too, averaged over many worlds
+        let patchiness = |clustering: usize| {
+            let config = WorldConfig {
+                width: 20,
+                height: 20,
+                fertile_fraction: 0.3,
+                initial_food_per_fertile: 10,
+                food_regen_rate: 0.1,
+                materials: MaterialsConfig::default(),
+                wildlife: WildlifeConfig { growth: 0.0, ..WildlifeConfig::default() },
+                water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+                clustering,
+            };
+            let mut shares = Vec::new();
+            for _ in 0..20 {
+                let world = World::new(&config);
+                let fertile: Vec<&Cell> = world.cells.iter().filter(|c| c.terrain == Terrain::Fertile).collect();
+                assert_eq!(fertile.len(), 120, "the fertile fraction is exact");
+                for c in fertile {
+                    let adj = world.adjacent(c.x, c.y);
+                    shares.push(adj.iter().filter(|a| a.terrain == Terrain::Fertile).count() as f64 / adj.len() as f64);
+                }
+            }
+            shares.iter().sum::<f64>() / shares.len() as f64
+        };
+        let scattered = patchiness(0);
+        let patchy = patchiness(2);
+
+        // Patches don't favour the map's edges
+        let config = WorldConfig {
+            width: 20, height: 20, fertile_fraction: 0.3, initial_food_per_fertile: 10, food_regen_rate: 0.1,
+            materials: MaterialsConfig::default(),
+            wildlife: WildlifeConfig { growth: 0.0, ..WildlifeConfig::default() },
+            water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
+        };
+        let (mut edge, mut edge_fertile) = (0, 0);
+        for _ in 0..50 {
+            for c in World::new(&config).cells {
+                if c.x == 0 || c.y == 0 || c.x == 19 || c.y == 19 {
+                    edge += 1;
+                    edge_fertile += (c.terrain == Terrain::Fertile) as usize;
+                }
+            }
+        }
+        let edge_share = edge_fertile as f64 / edge as f64;
+        assert!((0.24..0.36).contains(&edge_share), "edge cells fertile: {}", edge_share);
+        assert!((0.25..0.35).contains(&scattered), "scattered: {}", scattered);
+        assert!(patchy > 0.5, "patchy: {}", patchy);
+    }
+
+    #[test]
     fn test_world_creation() {
         let config = WorldConfig {
             width: 10,
@@ -823,6 +929,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let world = World::new(&config);
         assert_eq!(world.cells.len(), 100);
@@ -841,6 +948,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let world = World::new(&config);
         assert!(world.get(0, 0).is_some());
@@ -859,6 +967,7 @@ mod tests {
             materials: MaterialsConfig::default(),
             wildlife: WildlifeConfig::default(),
             water: WaterConfig { lakes: 0, ..WaterConfig::default() },
+            clustering: 2,
         };
         let world = World::new(&config);
 

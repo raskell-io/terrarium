@@ -12,6 +12,7 @@ Will they cooperate, compete, or something else entirely?
 width = 10
 height = 10
 fertile_fraction = 0.3      # 30% of land cells produce food
+# clustering = 2            # Smoothing passes: 0 scatters fertile cells, more makes larger valleys
 initial_food_per_fertile = 15
 food_regen_rate = 0.1       # 10% of capacity per epoch
 

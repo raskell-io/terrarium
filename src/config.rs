@@ -385,6 +385,7 @@ impl Default for Config {
                 materials: Default::default(),
                 wildlife: Default::default(),
                 water: Default::default(),
+                clustering: 2,
             },
             agents: AgentsConfig {
                 count: 10,
